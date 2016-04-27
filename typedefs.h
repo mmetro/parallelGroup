@@ -3,13 +3,13 @@
 
 Cell ** g_worldGrid;
 
-typedef struct {
+typedef struct Cell {
   double foodRemaining;
   int pheremoneLevel;
   int occupancy;
 } Cell;
 
-typedef struct {
+typedef struct Ant {
   double foodEaten;
   int x, y;
 } Ant;
