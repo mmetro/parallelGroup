@@ -419,8 +419,6 @@ void exchange_cells_pre() {
     {
       MPI_Recv(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
     }
-
-    // TODO: share ant and pheremone changes later on in another function
   }
   else
   {
@@ -428,8 +426,10 @@ void exchange_cells_pre() {
     MPI_Status status;
     for(i = 1; i < mpi_commsize; i++)
     {
+      // determine what rows are requested
       MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
       MPI_Recv(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
+      // send the requested rows
       for(j = 0; j < numRowsNeeded; j++)
       {
         MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD);
@@ -445,6 +445,7 @@ void exchange_cells_pre() {
 /***************************************************************************/
 // Send ant actions to world
 // Will use AntAction
+// TODO: should we make an eat action?  And how should it be done if we do
 void exchange_cells_post() {
     unsigned int i, j;
     MPI_Status status;
@@ -458,12 +459,15 @@ void exchange_cells_post() {
       // receive actions from all ranks
       for(i = 0; i < mpi_commsize; i++)
       {
+        // receive the number of actions in the queue
         unsigned int receive_actionCount;
         MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
 
+        //receive the action queue
         AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));;
         MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
 
+        // apply the effect of each action to the world
         for(j = 0; j < receive_actionCount; j++)
         {
           unsigned int x = receive_actionQueue[j].x;
