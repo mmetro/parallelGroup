@@ -386,7 +386,7 @@ void exchange_cells() {
     MPI_Wait(&sendRequest1, &status);
     for(j = 0; j < numRowsNeeded; j++)
     {
-      MPI_Recv(g_worldGrid[j], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &recvRequest1);
+      MPI_Recv(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &recvRequest1);
     }
 
     // TODO: share ant and pheremone changes later on in another function
@@ -401,7 +401,7 @@ void exchange_cells() {
       MPI_Recv(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
       for(j = 0; j < numRowsNeeded; j++)
       {
-        MPI_Send(g_worldGrid[j], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD);
+        MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD);
       }
     }
   }
