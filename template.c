@@ -57,6 +57,26 @@ typedef struct Ant {
   unsigned int x, y;
 } Ant;
 
+// MOVE_TO: increments a cell's occupancy
+// MOVE_FROM: decrements a cell's occupancy
+// SPRAY_PHEREMONE: increment pheremone levels
+// no eat action, because it's assumed ants will always eat
+// TODO: maybe make an EAT action
+typedef enum e_ActionType
+{
+    MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE;
+
+} ActionType;
+
+
+// The action struct to be sent with exchange_cells_post
+// Specifies an action that will modify cells in the world rank
+typedef struct AntAction {
+  ActionType action;
+  unsigned int x, y;
+} AntAction;
+
+
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -100,7 +120,9 @@ void run_farm();
 
 //run one iteration
 void run_tick();
-void exchange_cells();
+void exchange_cells_pre();
+void exchange_cells_post();
+
 
 // helper functions
 double GenRowVal(unsigned int rowNumber);
@@ -324,14 +346,16 @@ void allocate_and_init_array()
 void run_farm() {
   while (g_total_food > 0) 
   {
-    // run ant decisions
-    run_tick();
-
+    // update local copies of the world
+    exchange_cells_pre();
     MPI_Barrier( MPI_COMM_WORLD );
 
-    
-    exchange_cells();
+    // run ant decisions
+    run_tick();
+    MPI_Barrier( MPI_COMM_WORLD );
 
+    // send ant decisions to world rank
+    exchange_cells_post();
     MPI_Barrier( MPI_COMM_WORLD );
   }
 }
@@ -346,12 +370,11 @@ void run_tick() {
 
 
 /***************************************************************************/
-/* Function: exchange_cells ************************************************/
+/* Function: exchange_cells_pre ************************************************/
 /***************************************************************************/
-// exchange ants and pheromones
 // Ask world rank for rows
 // update only the rows nearby our ants
-void exchange_cells() {
+void exchange_cells_pre() {
   unsigned int i,j;
   // The number of rows it needs from a rank
   unsigned int numRowsNeeded = 0;
@@ -407,6 +430,15 @@ void exchange_cells() {
   }
   free(rowsNeeded);
   free(rankMessageArray);
+}
+
+/***************************************************************************/
+/* Function: exchange_cells_pre ************************************************/
+/***************************************************************************/
+// Send ant actions to world
+// Will use AntAction
+void exchange_cells_post() {
+
 }
 
 // generate a random value for the rank's nth row
