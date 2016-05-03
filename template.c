@@ -70,7 +70,7 @@ typedef enum e_ActionType
 
 
 // The action struct to be sent with exchange_cells_post
-// Specifies an action that will modify cells in the world rank
+// Specifies an action that will modify a cell in the world rank
 typedef struct AntAction {
   ActionType action;
   unsigned int x, y;
@@ -97,6 +97,9 @@ int mpi_commsize = -1;
 // each rank owns some ants
 unsigned int myNumAnts;
 Ant * myAnts;
+
+unsigned int actionCount;
+AntAction *actionQueue;
 
 #ifdef __LOCAL__
   double clockrate = 2.523e9;
@@ -334,6 +337,11 @@ void allocate_and_init_array()
     myAnts[i].y = (unsigned int) (GenAntVal(i) * g_array_size);
   }
 
+  // At most we can have myNumAnts*2 actions per tick.
+  // An ant moving will make two actions: a MOVE_TO and a MOVE_FROM
+  actionQueue = calloc(myNumAnts*2, sizeof(AntAction));
+  actionCount = 0;
+
   // TODO: how do we distribute food?  
   // Should be parallel deterministic, and needs to create an exact amount of food
 }
@@ -409,7 +417,7 @@ void exchange_cells_pre() {
     MPI_Wait(&sendRequest1, &status);
     for(j = 0; j < numRowsNeeded; j++)
     {
-      MPI_Recv(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &recvRequest1);
+      MPI_Recv(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
     }
 
     // TODO: share ant and pheremone changes later on in another function
@@ -438,7 +446,51 @@ void exchange_cells_pre() {
 // Send ant actions to world
 // Will use AntAction
 void exchange_cells_post() {
+    unsigned int i, j;
+    MPI_Status status;
+    MPI_Request sendRequest1;
+    // tell world rank how many actions we are sending, and then send the actions
+    MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &sendRequest1);
 
+    if(mpi_myrank == 0)
+    {
+      // receive actions from all ranks
+      for(i = 0; i < mpi_commsize; i++)
+      {
+        unsigned int receive_actionCount;
+        MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
+
+        AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));;
+        MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
+
+        for(j = 0; j < receive_actionCount; j++)
+        {
+          unsigned int x = receive_actionQueue[j].x;
+          unsigned int y = receive_actionQueue[j].y;
+
+          switch(receive_actionQueue[j].action) {
+            case MOVE_TO:
+              g_worldGrid[y][x].occupancy++;
+              break;
+            case MOVE_FROM:
+              g_worldGrid[y][x].occupancy--;
+              break;
+            case SPRAY_PHEREMONE:
+              g_worldGrid[y][x].pheremoneLevel += 10;
+              break;
+            default:
+              break;
+          }
+        }
+
+
+        free(receive_actionQueue);
+      }
+    }
+
+
+   actionCount = 0;
 }
 
 // generate a random value for the rank's nth row
