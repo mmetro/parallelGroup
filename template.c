@@ -349,7 +349,7 @@ void run_tick() {
 /* Function: exchange_cells ************************************************/
 /***************************************************************************/
 // exchange ants and pheromones
-// Ask master rank for rows
+// Ask world rank for rows
 // update only the rows nearby our ants
 void exchange_cells() {
   unsigned int i,j;
@@ -378,7 +378,7 @@ void exchange_cells() {
 
     MPI_Status status;
     MPI_Request sendRequest1, recvRequest1;
-    // tell master rank how many rows we are requesting, and the row numbers
+    // tell world rank how many rows we are requesting, and the row numbers
     MPI_Isend(&numRowsNeeded, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
     MPI_Isend(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
 
@@ -393,7 +393,7 @@ void exchange_cells() {
   }
   else
   {
-    // send the master rank rows to the others
+    // send the world rank's rows to the others
     MPI_Status status;
     for(i = 1; i < mpi_commsize; i++)
     {
@@ -414,7 +414,7 @@ void exchange_cells() {
 double GenRowVal(unsigned int rowNumber)
 {
   return GenVal(mpi_myrank * (g_array_size / mpi_commsize) + rowNumber);
-}
+}ok 
 
 // generate a random value for the rank's nth ant
 // each ant has its own random stream
