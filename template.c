@@ -20,7 +20,7 @@
 /***************************************************************************/
 
 // Define if running not on the BGQ
-// #define __LOCAL__
+ #define __LOCAL__
 
 
 // This gets clock cycle count locally
@@ -55,7 +55,7 @@ typedef struct Cell {
 typedef struct Ant {
   double foodEaten;
   unsigned int x, y;
-  int state;
+  AntState state;
 } Ant;
 
 // MOVE_TO: increments a cell's occupancy
@@ -65,16 +65,26 @@ typedef struct Ant {
 // TODO: maybe make an EAT action
 typedef enum e_ActionType
 {
-    MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE, SPRAY_FOUND, SPRAY_NEG, EAT;
+    MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE, SPRAY_FOUND, SPRAY_NEG, EAT
 
 } ActionType;
+
+typedef enum e_AntState
+{
+    NOTHING = 0, SEARCHING = 1, EATING = 5 
+
+} AntState;
 
 
 // The action struct to be sent with exchange_cells_post
 // Specifies an action that will modify a cell in the world rank
 typedef struct AntAction {
-  AntAction(ActionType type, int ax, int ay):
-  action(type), x(ax), y(ay){}; //init
+  // no constructor for structs.  Use calloc or malloc
+  //AntAction(ActionType type, int ax, int ay):
+
+  // no support for this in C, needs to be manually initialized
+  //action(type), x(ax), y(ay){}; //init
+
   ActionType action;
   unsigned int x, y;
 } AntAction;
@@ -135,8 +145,9 @@ void update_total_food();
 double GenRowVal(unsigned int rowNumber);
 double GenAntVal(unsigned int antNumber);
 void spray(int x, int y, int high, int low, int type);
-void eat(int x,int y, double food_left);
-void check_highest_level(int x, int y, int & nx, int & ny)
+void eat(int x, int y, double food_left);
+void check_highest_level(int x, int y, int * nx, int * ny);
+void queue_action(ActionType action, unsigned int x, unsigned int y);
 
 // Timing
 unsigned long long get_Time();
@@ -387,11 +398,11 @@ void run_farm() {
 /***************************************************************************/
 // run ant decisions
 void run_tick() {
-  unsigned int i,j;
+  unsigned int i;
   unsigned int x,y;
-  unsigned int ny, ny;
-  j = 0;
-  actionCount = 0;
+  unsigned int nx, ny;
+  AntAction aa;
+
   //loop through ants
   for(i = 0; i < myNumAnts; i++)
     {
@@ -403,10 +414,9 @@ void run_tick() {
         //if exists food 
         if (g_worldGrid[y][x].foodRemaining > 0)
         {
-          myAnts[i].state = 5;
+          myAnts[i].state = EATING;
           //EAT FOOD
-          actionQueue[j] = new AntAction(EAT, x,y);
-          j++;
+          queue_action(EAT, x, y);
         
           //if enough food
           if (g_worldGrid[y][x].foodRemaining > g_worldGrid[y][x].occupancy)
@@ -420,9 +430,8 @@ void run_tick() {
             //ant.food + split
             myAnts[i].foodEaten+= split;
             //SPRAY -1
-            actionQueue[j] = new AntAction(SPRAY_NEG, x,y);
-            myAnts[i].state = 1;
-            j++;
+            queue_action(SPRAY_NEG, x, y);
+            myAnts[i].state = SEARCHING;
           }
         }
         //else
@@ -432,31 +441,30 @@ void run_tick() {
           check_highest_level(x,y,nx,ny); //pass nx, ny by reference
           //if this is highest
           if (x==nx && y==ny)
-          {  actionQueue[j] = new AntAction(SPRAY_NEG, x,y);
-             j++; myAnts[i].state = 1;
+          {  
+            queue_action(SPRAY_NEG, x, y);
+            myAnts[i].state = SEARCHING;
           }
-          else if (myAnts[i].state == 0)
+          else if (myAnts[i].state == NOTHING)
           {
-            myAnts[i].state = 1;
-            actionQueue[j] = new AntAction(SPRAY_FOUND, x,y);
-            j++;
+            myAnts[i].state = SEARCHING;
+            queue_action(SPRAY_FOUND, x, y);
           }
-          else if (myAnts[i].state == 1)
-            actionQueue[j] = new AntAction(MOVE_TO, nx,ny);
-            actionQueue[j] = new AntAction(MOVE_FROM, x,y);
-            j+=2; 
+          else if (myAnts[i].state == SEARCHING)
+          {
+            queue_action(MOVE_TO, nx, ny);
+            queue_action(MOVE_FROM, x, y);
           }
         }
       }
       else
       {
         //MOVE random
-        myAnts[i].state = 0;
+        myAnts[i].state = NOTHING;
         nx = x + GenAntVal(i)*3 -2;
         ny = y + GenAntVal(i)*3 -2;
-        actionQueue[j] = new AntAction(MOVE_TO, nx,ny);
-        actionQueue[j] = new AntAction(MOVE_FROM, x,y);
-        j+=2;
+        queue_action(MOVE_TO, nx,ny);
+        queue_action(MOVE_FROM, x,y);
       }    
     }
 }
@@ -689,4 +697,16 @@ void update_total_food()
 void check_highest_level(int x, int y, int & nx, int & ny)
 {
 
+}
+
+
+/***************************************************************************/
+/* Function: queue_action *********************************************/
+/***************************************************************************/
+//queues an action 
+void queue_action(ActionType action, unsigned int x, unsigned int y)
+{
+  actionQueue[actionCount].action = action;
+  actionQueue[actionCount].x = x;
+  actionQueue[actionCount].y = y;
 }
