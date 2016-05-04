@@ -55,6 +55,7 @@ typedef struct Cell {
 typedef struct Ant {
   double foodEaten;
   unsigned int x, y;
+  int state;
 } Ant;
 
 // MOVE_TO: increments a cell's occupancy
@@ -64,7 +65,7 @@ typedef struct Ant {
 // TODO: maybe make an EAT action
 typedef enum e_ActionType
 {
-    MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE, EAT;
+    MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE, SPRAY_FOUND, SPRAY_NEG, EAT;
 
 } ActionType;
 
@@ -72,6 +73,8 @@ typedef enum e_ActionType
 // The action struct to be sent with exchange_cells_post
 // Specifies an action that will modify a cell in the world rank
 typedef struct AntAction {
+  AntAction(ActionType type, int ax, int ay):
+  action(type), x(ax), y(ay){}; //init
   ActionType action;
   unsigned int x, y;
 } AntAction;
@@ -125,6 +128,7 @@ void run_farm();
 void run_tick();
 void exchange_cells_pre();
 void exchange_cells_post();
+void update_total_food();
 
 
 // helper functions
@@ -132,6 +136,7 @@ double GenRowVal(unsigned int rowNumber);
 double GenAntVal(unsigned int antNumber);
 void spray(int x, int y, int high, int low, int type);
 void eat(int x,int y, double food_left);
+void check_highest_level(int x, int y, int & nx, int & ny)
 
 // Timing
 unsigned long long get_Time();
@@ -335,6 +340,7 @@ void allocate_and_init_array()
   for(i = 0; i < myNumAnts; i++)
   {
     myAnts[i].foodEaten = 0;
+    myAnts[i].state = 0;
     myAnts[i].x = (unsigned int) (GenAntVal(i) * g_array_size);
     myAnts[i].y = (unsigned int) (GenAntVal(i) * g_array_size);
   }
@@ -354,7 +360,7 @@ void allocate_and_init_array()
 /***************************************************************************/
 
 void run_farm() {
-  while (g_total_food > 0) 
+  while (g_total_food > 1) 
   {
     // update local copies of the world
     exchange_cells_pre();
@@ -367,6 +373,12 @@ void run_farm() {
     // send ant decisions to world rank
     exchange_cells_post();
     MPI_Barrier( MPI_COMM_WORLD );
+
+    //every 5 ticks
+      // update_total_food()
+      // world rank sends g_total_food to ranks 
+      
+      // world rank decrements any pheremone levels by 1
   }
 }
 
@@ -375,26 +387,75 @@ void run_farm() {
 /***************************************************************************/
 // run ant decisions
 void run_tick() {
+  unsigned int i,j;
+  unsigned int x,y;
+  unsigned int ny, ny;
+  j = 0;
+  actionCount = 0;
   //loop through ants
+  for(i = 0; i < myNumAnts; i++)
+    {
+      x = myAnts[i].x;
+      y = myAnts[i].y;
     //if exists pheremone on current cell
-      //if exists food 
-        //EAT FOOD
-        //if enough food
-          //ant.food + 1
-        //else 
-          //ant.food + split
-          //SPRAY -1
-      //else
-        //check highest level
-          //if this
-            //SPRAY -1
-          //else if best cell
-            //MOVE TO  best cell
-            //MOVE FROM this cell
+      if (g_worldGrid[y][x].pheremoneLevel > 0)
+      {
+        //if exists food 
+        if (g_worldGrid[y][x].foodRemaining > 0)
+        {
+          //EAT FOOD
+          actionQueue[j] = new AntAction(EAT, x,y);
+          j++;
         
-    //else
-      //else MOVE random
- 
+          //if enough food
+          if (g_worldGrid[y][x].foodRemaining > g_worldGrid[y][x].occupancy)
+          {
+            //ant.food + 1
+            myAnts[i].foodEaten++;
+          }
+          else
+          {
+            double split = g_worldGrid[y][x].foodRemaining/g_worldGrid[y][x].occupancy;
+            //ant.food + split
+            myAnts[i].foodEaten+= split;
+            //SPRAY -1
+            actionQueue[j] = new AntAction(SPRAY_NEG, x,y);
+            j++;
+          }
+        }
+        //else
+        else 
+        {
+          //check highest level
+          check_highest_level(x,y,nx,ny); //pass nx, ny by reference
+          //if this is highest
+          if (x==nx && y==ny)
+          {  actionQueue[j] = new AntAction(SPRAY_NEG, x,y);
+             j++; myAnts[i].state == 0;
+          }
+          else if (myAnts[i].state == 0)
+          {
+            myAnts[i].state = 1;
+            actionQueue[j] = new AntAction(SPRAY_FOUND, x,y);
+            j++;
+          }
+          else if (myAnts[i].state == 1)
+            actionQueue[j] = new AntAction(MOVE_TO, nx,ny);
+            actionQueue[j] = new AntAction(MOVE_FROM, x,y);
+            j+=2; 
+          }
+        }
+      }
+      else
+      {
+        //MOVE random
+        nx = x + GenAntVal(i)*3 -2;
+        ny = y + GenAntVal(i)*3 -2;
+        actionQueue[j] = new AntAction(MOVE_TO, nx,ny);
+        actionQueue[j] = new AntAction(MOVE_FROM, x,y);
+        j+=2;
+      }    
+    }
 }
 
 
@@ -498,16 +559,20 @@ void exchange_cells_post() {
           switch(receive_actionQueue[j].action) {
             case MOVE_TO:
               g_worldGrid[y][x].occupancy++;
-              //ant.xy change
               break;
             case MOVE_FROM:
               g_worldGrid[y][x].occupancy--;
-              //ant.xy change
               break;
             case SPRAY_PHEREMONE:
               spray(x,y,15,5,1);
               break;
-            case EAT:
+            case SPRAY_FOUND:
+              spray(x,y,5,5,1);
+              break;
+            case SPRAY_NEG:
+              spray(x,y,1,0,-1);
+              break;
+            case EAT:1
               eat(x,y, food_left);
               break;
             default:
@@ -561,7 +626,11 @@ unsigned long long get_Time()
 // +1 for food, -1 for no food
 void spray(int x, int y, int high, int low, int type)
 {
-  g_worldGrid[y][x].pheremoneLevel += (high*type);
+  if (g_worldGrid[y][x].pheremoneLevel != 0 || type == 1)
+  {
+    g_worldGrid[y][x].pheremoneLevel += (high*type);  
+  }
+  
   if (x != 0 && low !=0)
   { 
     g_worldGrid[y][x-1].pheremoneLevel += (low*type);
@@ -594,7 +663,27 @@ void eat(int x, int y, double food_left)
 {
   int split = g_worldGrid[y][x].occupancy;
   if (food_left < split)
-    { g_worldGrid[y][x].foodRemaining -= (food_left/split);}
+    { g_worldGrid[y][x].foodRemaining -= (food_left/split);
+      g_total_food -= (food_left/split); }
   else
-    { g_worldGrid[y][x].foodRemaining--;}
+    { g_worldGrid[y][x].foodRemaining--;
+      g_total_food--;}
+}
+
+/***************************************************************************/
+/* Function: update_total_food *********************************************/
+/***************************************************************************/
+//world rank sends remaining total to all ranks 
+void update_total_food()
+{
+
+}
+
+/***************************************************************************/
+/* Function: check_highest_level********************************************/
+/***************************************************************************/
+//finds highest pheremone level around x,y, or just x,y if already highest
+void check_highest_level(int x, int y, int & nx, int & ny)
+{
+
 }
