@@ -64,7 +64,7 @@ typedef struct Ant {
 // TODO: maybe make an EAT action
 typedef enum e_ActionType
 {
-    MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE;
+    MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE, EAT;
 
 } ActionType;
 
@@ -130,6 +130,8 @@ void exchange_cells_post();
 // helper functions
 double GenRowVal(unsigned int rowNumber);
 double GenAntVal(unsigned int antNumber);
+void spray(int x, int y, int high, int low, int type);
+void eat(int x,int y);
 
 // Timing
 unsigned long long get_Time();
@@ -373,6 +375,25 @@ void run_farm() {
 /***************************************************************************/
 // run ant decisions
 void run_tick() {
+  //loop through ants
+    //if exists pheremone on current cell
+      //if exists food 
+        //EAT FOOD
+        //if enough food
+          //ant.food + 1
+        //else 
+          //ant.food + split
+          //SPRAY -1
+      //else
+        //check highest level
+          //if this
+            //SPRAY -1
+          //else if best cell
+            //MOVE TO  best cell
+            //MOVE FROM this cell
+        
+    //else
+      //else MOVE random
  
 }
 
@@ -441,7 +462,7 @@ void exchange_cells_pre() {
 }
 
 /***************************************************************************/
-/* Function: exchange_cells_pre ************************************************/
+/* Function: exchange_cells_post ************************************************/
 /***************************************************************************/
 // Send ant actions to world
 // Will use AntAction
@@ -476,12 +497,17 @@ void exchange_cells_post() {
           switch(receive_actionQueue[j].action) {
             case MOVE_TO:
               g_worldGrid[y][x].occupancy++;
+              //ant.xy change
               break;
             case MOVE_FROM:
               g_worldGrid[y][x].occupancy--;
+              //ant.xy change
               break;
             case SPRAY_PHEREMONE:
-              g_worldGrid[y][x].pheremoneLevel += 10;
+              spray(x,y,15,5,1);
+              break;
+            case EAT:
+              eat(x,y);
               break;
             default:
               break;
@@ -525,3 +551,49 @@ unsigned long long get_Time()
   #endif
 }
 
+
+/***************************************************************************/
+/* Function: spray ******************************************************/
+/***************************************************************************/
+
+//sprays pheremones on adjacent Cells
+// +1 for food, -1 for no food
+void spray(int x, int y, int high, int low, int type)
+{
+  g_worldGrid[y][x].pheremoneLevel += (high*type);
+  if (x != 0 && low !=0)
+  { 
+    g_worldGrid[y][x-1].pheremoneLevel += (low*type);
+    if (y != 0) 
+      { g_worldGrid[y-1][x-1].pheremoneLevel += (low*type); }
+    else if (y != g_array_size) 
+      { g_worldGrid[y+1][x-1].pheremoneLevel += (low*type);}
+    
+  }
+  else if (x != g_array_size && low !=0)
+  {
+    g_worldGrid[y][x+1].pheremoneLevel += (low*type);
+    if (y != 0) 
+      { g_worldGrid[y-1][x+1].pheremoneLevel += (low*type); }
+    else if (y != g_array_size) 
+      { g_worldGrid[y+1][x+1].pheremoneLevel += (low*type);}
+  }
+  if (y != 0 && low !=0)
+    { g_worldGrid[y-1][x].pheremoneLevel += (low*type); }
+  else if (y != g_array_size && low !=0)
+    { g_worldGrid[y+1][x].pheremoneLevel += (low*type); }
+}
+
+/***************************************************************************/
+/* Function: eat ******************************************************/
+/***************************************************************************/
+
+//consumes food in current cell
+void eat(int x, int y)
+{
+  int split = g_worldGrid[y][x].occupancy;
+  if (g_worldGrid[y][x].foodRemaining < split)
+    { g_worldGrid[y][x] -= (g_worldGrid[y][x]/split);}
+  else
+    { g_worldGrid[y][x].foodRemaining--;}
+}
