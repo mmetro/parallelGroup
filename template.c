@@ -242,7 +242,7 @@ void process_arguments(int argc, char* argv[]) {
   // Argument 5 is the food respawn chance.  It can be used to make the simulation endless, but should be left at 0 for now 
 
   // Check for 5 arguments
-  if (argc != 5) {
+  if (argc != 6) {
     printf("Usage: \n%s <num of threads> <matrix size> <num of ants> <num of food> <respawn chance>\n", argv[0]);
     exit(1);
   }
