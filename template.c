@@ -327,7 +327,8 @@ void allocate_and_init_array()
   for (row = 0; row < g_array_size; row++)
   {
     g_worldGrid[row] = calloc(g_array_size, sizeof(Cell));
-    for (col = 0; col < g_array_size; col++)
+    for (col = 0; col < g_array_size; co
+      l++)
     {
       g_worldGrid[row][col].foodRemaining = 0;
       g_worldGrid[row][col].pheremoneLevel = 0;
@@ -403,6 +404,7 @@ void run_tick() {
         //if exists food 
         if (g_worldGrid[y][x].foodRemaining > 0)
         {
+          myAnts[i].state = 5;
           //EAT FOOD
           actionQueue[j] = new AntAction(EAT, x,y);
           j++;
@@ -420,6 +422,7 @@ void run_tick() {
             myAnts[i].foodEaten+= split;
             //SPRAY -1
             actionQueue[j] = new AntAction(SPRAY_NEG, x,y);
+            myAnts[i].state = 1;
             j++;
           }
         }
@@ -431,7 +434,7 @@ void run_tick() {
           //if this is highest
           if (x==nx && y==ny)
           {  actionQueue[j] = new AntAction(SPRAY_NEG, x,y);
-             j++; myAnts[i].state = 0;
+             j++; myAnts[i].state = 1;
           }
           else if (myAnts[i].state == 0)
           {
@@ -449,6 +452,7 @@ void run_tick() {
       else
       {
         //MOVE random
+        myAnts[i].state = 0;
         nx = x + GenAntVal(i)*3 -2;
         ny = y + GenAntVal(i)*3 -2;
         actionQueue[j] = new AntAction(MOVE_TO, nx,ny);
