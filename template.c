@@ -131,7 +131,7 @@ void exchange_cells_post();
 double GenRowVal(unsigned int rowNumber);
 double GenAntVal(unsigned int antNumber);
 void spray(int x, int y, int high, int low, int type);
-void eat(int x,int y);
+void eat(int x,int y, double food_left);
 
 // Timing
 unsigned long long get_Time();
@@ -477,6 +477,7 @@ void exchange_cells_post() {
 
     if(mpi_myrank == 0)
     {
+      double food_left = g_worldGrid[y][x].foodRemaining;
       // receive actions from all ranks
       for(i = 0; i < mpi_commsize; i++)
       {
@@ -507,7 +508,7 @@ void exchange_cells_post() {
               spray(x,y,15,5,1);
               break;
             case EAT:
-              eat(x,y);
+              eat(x,y, food_left);
               break;
             default:
               break;
@@ -589,11 +590,11 @@ void spray(int x, int y, int high, int low, int type)
 /***************************************************************************/
 
 //consumes food in current cell
-void eat(int x, int y)
+void eat(int x, int y, double food_left)
 {
   int split = g_worldGrid[y][x].occupancy;
-  if (g_worldGrid[y][x].foodRemaining < split)
-    { g_worldGrid[y][x] -= (g_worldGrid[y][x]/split);}
+  if (food_left < split)
+    { g_worldGrid[y][x].foodRemaining -= (food_left/split);}
   else
     { g_worldGrid[y][x].foodRemaining--;}
 }
