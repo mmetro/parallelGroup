@@ -52,6 +52,14 @@ typedef struct Cell {
   int occupancy;
 } Cell;
 
+// Not totally sure on the details of this one
+// Allen, could you comment this
+typedef enum e_AntState
+{
+    NOTHING = 0, SEARCHING = 1, EATING = 5 
+
+} AntState;
+
 typedef struct Ant {
   double foodEaten;
   unsigned int x, y;
@@ -62,18 +70,11 @@ typedef struct Ant {
 // MOVE_FROM: decrements a cell's occupancy
 // SPRAY_PHEREMONE: increment pheremone levels
 // no eat action, because it's assumed ants will always eat
-// TODO: maybe make an EAT action
 typedef enum e_ActionType
 {
     MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE, SPRAY_FOUND, SPRAY_NEG, EAT
 
 } ActionType;
-
-typedef enum e_AntState
-{
-    NOTHING = 0, SEARCHING = 1, EATING = 5 
-
-} AntState;
 
 
 // The action struct to be sent with exchange_cells_post
@@ -113,12 +114,17 @@ Ant * myAnts;
 
 unsigned int actionCount;
 AntAction *actionQueue;
+// error if we have more than this many actions queued
+unsigned int actionCountMax;
 
 #ifdef __LOCAL__
   double clockrate = 2.523e9;
 #else
   double clockrate = 1.6e9;
 #endif
+
+time_t start_cycle_time;
+time_t mid_cycle_time;
 
 
 /***************************************************************************/
@@ -177,7 +183,7 @@ int main(int argc, char *argv[])
 // Init 16,384 RNG streams - each row and each ant has an independent stream
   InitDefault();
 
-  mpi_log_debug("Rank %d of %d started.\n", mpi_myrank, mpi_commsize);
+  printf("Rank %d of %d started.\n", mpi_myrank, mpi_commsize);
 
   // Read in and process the remaining arguments.
   process_arguments(argc, argv);
@@ -187,7 +193,7 @@ int main(int argc, char *argv[])
   // for that chunk.
   allocate_and_init_array();
 
-  mpi_log_debug("Initialization complete. Ant farm started...\n\n");
+  printf("Initialization complete. Ant farm started...\n\n");
 
   MPI_Barrier( MPI_COMM_WORLD );
 
@@ -198,7 +204,7 @@ int main(int argc, char *argv[])
   MPI_Barrier( MPI_COMM_WORLD );
 
   if (mpi_myrank == 0) {
-    mid_cycle_time = get_cycles();
+    mid_cycle_time = time(NULL);
 
     compute_time = (mid_cycle_time - start_cycle_time) / clockrate;
     printf("Simulation duration:\t%f seconds\n", compute_time);
@@ -207,7 +213,7 @@ int main(int argc, char *argv[])
 
 
   if (mpi_myrank == 0) {
-    mpi_log_debug(" Simulation Complete!");
+    printf(" Simulation Complete!");
   }
 
 
@@ -237,71 +243,71 @@ void process_arguments(int argc, char* argv[]) {
 
   // Check for 5 arguments
   if (argc != 5) {
-    mpi_log_error("Usage: \n%s <num of threads> <matrix size> <num of ants> <num of food>\n", argv[0]);
+    printf("Usage: \n%s <num of threads> <matrix size> <num of ants> <num of food> <respawn chance>\n", argv[0]);
     exit(1);
   }
   else
   {
     // Next, read in the number of threads
-    mpi_log_debug("Read in number of threads: %s\n", argv[1]);
+    printf("Read in number of threads: %s\n", argv[1]);
     threads = atoi(argv[1]);
 
     // Read in the matrix size
-    mpi_log_debug("Read in matrix size: %s\n", argv[2]);
+    printf("Read in matrix size: %s\n", argv[2]);
     size = atoi(argv[2]);
 
     // Read in the number of ants
-    mpi_log_debug("Read in number of ants: %s\n", argv[3]);
+    printf("Read in number of ants: %s\n", argv[3]);
     ants = atoi(argv[3]);
 
     // Read in the total amount of food
-    mpi_log_debug("Read in amount of food: %s\n", argv[4]);
+    printf("Read in amount of food: %s\n", argv[4]);
     food = atoi(argv[4]);
 
     // Read in the food respawn chance
-    mpi_log_debug("Read in food respawn chance %s\n", argv[5]);
+    printf("Read in food respawn chance %s\n", argv[5]);
     food_respawn = ((double)atoi(argv[5])) / 100.0;
 
     if (size <= 0)
     {
-      mpi_log_debug("Matrix size not defined, setting to defined value: %u.\n", __MATRIX_SIZE__);
+      printf("Matrix size not defined, setting to defined value: %u.\n", __MATRIX_SIZE__);
       size = __MATRIX_SIZE__;
     }
 
     // Validate this input, and then save it in the global variables
     if (threads < 0)
     {
-      mpi_log_error("ERROR: Number of threads less than 0. Please try again.\n");
+      printf("ERROR: Number of threads less than 0. Please try again.\n");
       exit(1);
     }
 
     if (ants <= 0)
     {
-      mpi_log_error("ERROR: Cannot have less than 1 ant.\n");
+      printf("ERROR: Cannot have less than 1 ant.\n");
       exit(1);
     }
 
     if (food <= 0)
     {
-      mpi_log_error("ERROR: Cannot have less than 1 food.\n");
+      printf("ERROR: Cannot have less than 1 food.\n");
       exit(1);
     }
 
     if (food_respawn < 0.0 || food_respawn > 1.0)
     {
-      mpi_log_error("ERROR: Food respawn rate must be between 0 and 100 percent.\n");
+      printf("ERROR: Food respawn rate must be between 0 and 100 percent.\n");
       exit(1);
     }
 
     // check if there are more threads than rows per rank! must reduce if so!
     if (threads > size / mpi_commsize) {
-        mpi_log_debug("Detected 'threads = %d' greater than rows per thread in each rank\n", threads);
+        printf("Detected 'threads = %d' greater than rows per thread in each rank\n", threads);
         threads = size / mpi_commsize;
-        mpi_log_debug("Reducing number of threads per rank to %d\n", threads);
+        printf("Reducing number of threads per rank to %d\n", threads);
     }
 
     if (mpi_commsize > size) {
-      mpi_log_error("ERROR: Cannot have more ranks than rows in the matrix. Please try again.\n");
+      printf("ERROR: Cannot have more ranks than rows in the matrix. Please try again.\n");
       exit(1);
     }
 
@@ -358,7 +364,8 @@ void allocate_and_init_array()
 
   // At most we can have myNumAnts*2 actions per tick.
   // An ant moving will make two actions: a MOVE_TO and a MOVE_FROM
-  actionQueue = calloc(myNumAnts*2, sizeof(AntAction));
+  actionCountMax = myNumAnts*2;
+  actionQueue = calloc(actionCountMax, sizeof(AntAction));
   actionCount = 0;
 
   // TODO: how do we distribute food?  
@@ -452,6 +459,8 @@ void run_tick() {
           }
           else if (myAnts[i].state == SEARCHING)
           {
+            myAnts[i].x = nx;
+            myAnts[i].y = ny;
             queue_action(MOVE_TO, nx, ny);
             queue_action(MOVE_FROM, x, y);
           }
@@ -463,6 +472,8 @@ void run_tick() {
         myAnts[i].state = NOTHING;
         nx = x + GenAntVal(i)*3 -2;
         ny = y + GenAntVal(i)*3 -2;
+        myAnts[i].x = nx;
+        myAnts[i].y = ny;
         queue_action(MOVE_TO, nx,ny);
         queue_action(MOVE_FROM, x,y);
       }    
@@ -538,18 +549,16 @@ void exchange_cells_pre() {
 /***************************************************************************/
 // Send ant actions to world
 // Will use AntAction
-// TODO: should we make an eat action?  And how should it be done if we do
 void exchange_cells_post() {
     unsigned int i, j;
     MPI_Status status;
     MPI_Request sendRequest1;
     // tell world rank how many actions we are sending, and then send the actions
     MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
-    MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &sendRequest1);
 
     if(mpi_myrank == 0)
     {
-      double food_left = g_worldGrid[y][x].foodRemaining;
       // receive actions from all ranks
       for(i = 0; i < mpi_commsize; i++)
       {
@@ -558,14 +567,15 @@ void exchange_cells_post() {
         MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
 
         //receive the action queue
-        AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));;
-        MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
+        AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));
+        MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
 
         // apply the effect of each action to the world
         for(j = 0; j < receive_actionCount; j++)
         {
           unsigned int x = receive_actionQueue[j].x;
           unsigned int y = receive_actionQueue[j].y;
+          double food_left = g_worldGrid[y][x].foodRemaining;
 
           switch(receive_actionQueue[j].action) {
             case MOVE_TO:
@@ -583,7 +593,7 @@ void exchange_cells_post() {
             case SPRAY_NEG:
               spray(x,y,1,0,-1);
               break;
-            case EAT:1
+            case EAT:
               eat(x,y, food_left);
               break;
             default:
@@ -605,7 +615,7 @@ void exchange_cells_post() {
 double GenRowVal(unsigned int rowNumber)
 {
   return GenVal(mpi_myrank * (g_array_size / mpi_commsize) + rowNumber);
-}ok 
+}
 
 // generate a random value for the rank's nth ant
 // each ant has its own random stream
@@ -694,7 +704,7 @@ void update_total_food()
 /* Function: check_highest_level********************************************/
 /***************************************************************************/
 //finds highest pheremone level around x,y, or just x,y if already highest
-void check_highest_level(int x, int y, int & nx, int & ny)
+void check_highest_level(int x, int y, int * nx, int * ny)
 {
 
 }
@@ -706,7 +716,14 @@ void check_highest_level(int x, int y, int & nx, int & ny)
 //queues an action 
 void queue_action(ActionType action, unsigned int x, unsigned int y)
 {
-  actionQueue[actionCount].action = action;
-  actionQueue[actionCount].x = x;
-  actionQueue[actionCount].y = y;
+  if(actionCount > actionCountMax)
+  {
+    printf("ERROR: Action queue is full.\n");
+  }
+  else
+  {
+    actionQueue[actionCount].action = action;
+    actionQueue[actionCount].x = x;
+    actionQueue[actionCount].y = y;
+  }
 }
