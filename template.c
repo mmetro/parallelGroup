@@ -384,21 +384,22 @@ void run_farm() {
   while (g_total_food > 1) 
   {
     if (mpi_myrank == 0)  print_world();
+    //if (mpi_myrank == 0)  print_world();
     // update local copies of the world
     exchange_cells_pre();
     MPI_Barrier( MPI_COMM_WORLD );
 
-    if (mpi_myrank == 0)  print_world();
+    //if (mpi_myrank == 0)  print_world();
     // run ant decisions
     run_tick();
     MPI_Barrier( MPI_COMM_WORLD );
 
-    if (mpi_myrank == 0)  print_world();
+    //if (mpi_myrank == 0)  print_world();
     // send ant decisions to world rank
     exchange_cells_post();
     MPI_Barrier( MPI_COMM_WORLD );
 
-    if (mpi_myrank == 0)  print_world();
+    //if (mpi_myrank == 0)  print_world();
     //every 5 ticks
       // update_total_food()
       // world rank sends g_total_food to ranks 
@@ -422,6 +423,7 @@ void run_tick() {
     {
       x = myAnts[i].x;
       y = myAnts[i].y;
+      //printf("myrank = %d, i = %d, x = %d, y = %d\n", mpi_myrank, i, x,y);
     //if exists pheremone on current cell
       if (g_worldGrid[y][x].pheremoneLevel > 0)
       {
@@ -452,7 +454,7 @@ void run_tick() {
         else 
         {
           //check highest level
-          check_highest_level(x,y,nx,ny); //pass nx, ny by reference
+          check_highest_level(x,y,&nx,&ny); //pass nx, ny by reference
           //if this is highest
           if (x==nx && y==ny)
           {  
@@ -477,8 +479,8 @@ void run_tick() {
       {
         //MOVE random
         myAnts[i].state = NOTHING;
-        nx = x + GenAntVal(i)*3 -2;
-        ny = y + GenAntVal(i)*3 -2;
+        nx = ((int)(x + GenAntVal(i)*3 -2))%g_array_size;
+        ny = ((int)(y + GenAntVal(i)*3 -2))%g_array_size;
         myAnts[i].x = nx;
         myAnts[i].y = ny;
         queue_action(MOVE_TO, nx,ny);
@@ -507,11 +509,11 @@ void exchange_cells_pre() {
     // determine which rows we will request
     for(i = 0; i < myNumAnts; i++)
     {
-      for(j = myAnts[i].y - 1; j <= myAnts[i].y + 1; j++)
+      for(j = (myAnts[i].y - 1)% g_array_size; j != (myAnts[i].y + 2)% g_array_size; j = (j+1) % g_array_size)
       {
         if(rowsNeeded[j % g_array_size] == FALSE)
         {
-          rankMessageArray[numRowsNeeded] = j;
+          rankMessageArray[numRowsNeeded] = j % g_array_size;
           numRowsNeeded++;
           rowsNeeded[j  % g_array_size] = TRUE;
         }
@@ -543,6 +545,7 @@ void exchange_cells_pre() {
       // send the requested rows
       for(j = 0; j < numRowsNeeded; j++)
       {
+        //printf("i = %u, numRowsNeeded = %u, j = %u, rankMessageArray[j] = %u\n", i, numRowsNeeded, j, rankMessageArray[j]);
         MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD);
       }
     }
@@ -563,7 +566,7 @@ void exchange_cells_post() {
     // tell world rank how many actions we are sending, and then send the actions
     MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
     MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &sendRequest1);
-
+    //printf("Sent %u actions to rank 0\n", actionCount);
     if(mpi_myrank == 0)
     {
       // receive actions from all ranks
@@ -615,6 +618,7 @@ void exchange_cells_post() {
 
 
    actionCount = 0;
+   //printf("Exiting exchange_cells_post\n");
 }
 
 // generate a random value for the rank's nth row
@@ -751,5 +755,6 @@ void queue_action(ActionType action, unsigned int x, unsigned int y)
     actionQueue[actionCount].action = action;
     actionQueue[actionCount].x = x;
     actionQueue[actionCount].y = y;
+    actionCount++;
   }
 }
