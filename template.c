@@ -192,6 +192,7 @@ int main(int argc, char *argv[])
   // randomly initialize the values in that chunk using the proper RNG stream
   // for that chunk.
   allocate_and_init_array();
+  if (mpi_myrank == 0)  print_world();
 
   printf("Initialization complete. Ant farm started...\n\n");
 
@@ -337,6 +338,12 @@ void allocate_and_init_array()
   unsigned int i;
   unsigned int foodheap = g_total_food/mpi_commsize;
 
+  // At most we can have myNumAnts*2 actions per tick.
+  // An ant moving will make two actions: a MOVE_TO and a MOVE_FROM
+  actionCountMax = myNumAnts*2;
+  actionQueue = calloc(actionCountMax, sizeof(AntAction));
+  actionCount = 0;
+
   // each rank has a local copy of the world
   // ranks update their local copies, gasking only for the pieces of the world near their ants
 
@@ -360,14 +367,10 @@ void allocate_and_init_array()
     myAnts[i].state = 0;
     myAnts[i].x = (unsigned int) (GenAntVal(i) * g_array_size);
     myAnts[i].y = (unsigned int) (GenAntVal(i) * g_array_size);
+    queue_action(MOVE_TO, myAnts[i].x, myAnts[i].y);
   }
 
-  // At most we can have myNumAnts*2 actions per tick.
-  // An ant moving will make two actions: a MOVE_TO and a MOVE_FROM
-  actionCountMax = myNumAnts*2;
-  actionQueue = calloc(actionCountMax, sizeof(AntAction));
-  actionCount = 0;
-
+  exchange_cells_post();
   // TODO: how do we distribute food?  
   // Should be parallel deterministic, and needs to create an exact amount of food
 }
@@ -380,18 +383,22 @@ void allocate_and_init_array()
 void run_farm() {
   while (g_total_food > 1) 
   {
+    if (mpi_myrank == 0)  print_world();
     // update local copies of the world
     exchange_cells_pre();
     MPI_Barrier( MPI_COMM_WORLD );
 
+    if (mpi_myrank == 0)  print_world();
     // run ant decisions
     run_tick();
     MPI_Barrier( MPI_COMM_WORLD );
 
+    if (mpi_myrank == 0)  print_world();
     // send ant decisions to world rank
     exchange_cells_post();
     MPI_Barrier( MPI_COMM_WORLD );
 
+    if (mpi_myrank == 0)  print_world();
     //every 5 ticks
       // update_total_food()
       // world rank sends g_total_food to ranks 
@@ -482,7 +489,7 @@ void run_tick() {
 
 
 /***************************************************************************/
-/* Function: exchange_cells_pre ************************************************/
+/* Function: exchange_cells_pre ********************************************/
 /***************************************************************************/
 // Ask world rank for rows
 // update only the rows nearby our ants
@@ -545,7 +552,7 @@ void exchange_cells_pre() {
 }
 
 /***************************************************************************/
-/* Function: exchange_cells_post ************************************************/
+/* Function: exchange_cells_post *******************************************/
 /***************************************************************************/
 // Send ant actions to world
 // Will use AntAction
@@ -568,7 +575,7 @@ void exchange_cells_post() {
 
         //receive the action queue
         AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));
-        MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
+        MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD, &status);
 
         // apply the effect of each action to the world
         for(j = 0; j < receive_actionCount; j++)
@@ -640,7 +647,7 @@ unsigned long long get_Time()
 
 
 /***************************************************************************/
-/* Function: spray ******************************************************/
+/* Function: spray *********************************************************/
 /***************************************************************************/
 
 //sprays pheremones on adjacent Cells
@@ -676,7 +683,7 @@ void spray(int x, int y, int high, int low, int type)
 }
 
 /***************************************************************************/
-/* Function: eat ******************************************************/
+/* Function: eat ***********************************************************/
 /***************************************************************************/
 
 //consumes food in current cell
@@ -711,7 +718,26 @@ void check_highest_level(int x, int y, int * nx, int * ny)
 
 
 /***************************************************************************/
-/* Function: queue_action *********************************************/
+/* Function: print_world****************************************************/
+/***************************************************************************/
+//print out an ascii representation of the world
+void print_world()
+{
+  unsigned int i,j;
+  for(j = 0; j < g_array_size; j++)
+  {
+    for(i = 0; i < g_array_size; i++)
+    {
+      printf("%2u", g_worldGrid[j][i].occupancy);
+    }
+    printf("\n");
+  }
+
+}
+
+
+/***************************************************************************/
+/* Function: queue_action **************************************************/
 /***************************************************************************/
 //queues an action 
 void queue_action(ActionType action, unsigned int x, unsigned int y)
