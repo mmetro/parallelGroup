@@ -431,7 +431,7 @@ void run_tick() {
           //if this is highest
           if (x==nx && y==ny)
           {  actionQueue[j] = new AntAction(SPRAY_NEG, x,y);
-             j++; myAnts[i].state == 0;
+             j++; myAnts[i].state = 0;
           }
           else if (myAnts[i].state == 0)
           {
