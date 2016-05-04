@@ -327,8 +327,7 @@ void allocate_and_init_array()
   for (row = 0; row < g_array_size; row++)
   {
     g_worldGrid[row] = calloc(g_array_size, sizeof(Cell));
-    for (col = 0; col < g_array_size; co
-      l++)
+    for (col = 0; col < g_array_size; col++)
     {
       g_worldGrid[row][col].foodRemaining = 0;
       g_worldGrid[row][col].pheremoneLevel = 0;
