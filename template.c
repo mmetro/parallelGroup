@@ -46,17 +46,19 @@ uint64_t rdtsc(){
 #define TRUE 1
 #define FALSE  0
 
-typedef struct Cell {
-  double foodRemaining;
-  int pheremoneLevel;
-  int occupancy;
-} Cell;
-
 typedef struct Ant {
   double foodEaten;
   unsigned int x, y;
   int state;
 } Ant;
+
+typedef struct param_t{
+	int mystart;
+	int myend;
+	pthread_mutex_t * antlock;
+	pthread_mutex_t * ticklock;
+	int threadnum;
+} param_t;
 
 // MOVE_TO: increments a cell's occupancy
 // MOVE_FROM: decrements a cell's occupancy
@@ -70,24 +72,22 @@ typedef enum e_ActionType
 } ActionType;
 
 
-// The action struct to be sent with exchange_cells_post
-// Specifies an action that will modify a cell in the world rank
-typedef struct AntAction {
-  AntAction(ActionType type, int ax, int ay):
-  action(type), x(ax), y(ay){}; //init
-  ActionType action;
-  unsigned int x, y;
-} AntAction;
-
-
-
 /***************************************************************************/
 /* Global Vars *************************************************************/
 /***************************************************************************/
 
-Cell ** g_worldGrid;
+double ** g_localFoodGrid;
+double *** g_remoteFoodGrids;
+int ** g_localPheremoneGrid;
+int *** g_remotePheremoneGrids;
+int ** g_localOccupancyGrid;
+int *** g_remoteOccupancyGrids;
+MPI_Win winfood, winph, winoc;
+unsigned int * tickcounts;
 
 unsigned int g_array_size = 0;
+unsigned int my_array_size = 0;
+unsigned int standard_array_size = 0;
 int g_num_threads = 0;
 int g_num_ants = 0;
 int g_total_food = 0;
@@ -100,9 +100,6 @@ int mpi_commsize = -1;
 // each rank owns some ants
 unsigned int myNumAnts;
 Ant * myAnts;
-
-unsigned int actionCount;
-AntAction *actionQueue;
 
 #ifdef __LOCAL__
   double clockrate = 2.523e9;
@@ -122,18 +119,14 @@ void process_arguments(int argc, char* argv[]);
 void allocate_and_init_array();
 
 //simulation
-void run_farm();
+void *run_farm( void * pt);
 
 //run one iteration
-void run_tick();
-void exchange_cells_pre();
-void exchange_cells_post();
+void run_tick(param_t * p);
 void update_total_food();
 
 
 // helper functions
-double GenRowVal(unsigned int rowNumber);
-double GenAntVal(unsigned int antNumber);
 void spray(int x, int y, int high, int low, int type);
 void eat(int x,int y, double food_left);
 void check_highest_level(int x, int y, int & nx, int & ny)
@@ -153,9 +146,10 @@ int main(int argc, char *argv[])
   unsigned long long start_time=0;
   unsigned long long end_time=0;
   double compute_time = 0;
+  int provided;
 
 // Example MPI startup and using CLCG4 RNG
-  MPI_Init( &argc, &argv);
+  MPI_Init_thread( &argc, &argv, MPI_THREAD_MULTIPLE, &provided);
   MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
   MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
 
@@ -176,26 +170,45 @@ int main(int argc, char *argv[])
   // for that chunk.
   allocate_and_init_array();
 
-  mpi_log_debug("Initialization complete. Ant farm started...\n\n");
-
   MPI_Barrier( MPI_COMM_WORLD );
 
+  mpi_log_debug("Rank %d: Initialization complete. Ant farm started...\n", mpi_myrank);
+
   //Run simulation 
-  run_farm();  
+  int i;
+  pthread_mutex_t antlock;//lock for editing/checking recprogress
+  pthread_mutex_t ticklock;//lock for editing/checking progress
+  pthread_mutex_init(&antlock, NULL);
+  pthread_mutex_init(&ticklock, NULL);
+  int ants_per_thread = myNumAnts/g_num_threads;
+  pthread_t p[g_num_threads];//keep track of each thread
+  for (i = 0; i < g_num_threads;i++){
+    param_t * p = (param_t *)malloc(1*sizeof(param_t));
+    p->mystart=ants_per_thread*i;
+    p->myend = ants_per_thread*(i+1);
+    p->antlock = &antlock;
+    p->ticklock = &ticklock;
+    p->threadnum = i;
+    pthread_create(&(p[i-1]), NULL,run_farm,(void *)p); 
+  }
+  param_t * p = (param_t *)malloc(1*sizeof(param_t));
+  p->mystart=ants_per_thread*g_num_threads;
+  p->myend = myNumAnts;
+  p->antlock = &antlock;
+  p->ticklock = &ticklock;
+  p->threadnum = g_num_threads;
+  run_farm((void *)p);  
   
   // // Barrier after completion
   MPI_Barrier( MPI_COMM_WORLD );
+  pthread_mutex_destroy(&antlock);
+  pthread_mutex_destroy(&ticklock);
 
   if (mpi_myrank == 0) {
     mid_cycle_time = get_cycles();
 
     compute_time = (mid_cycle_time - start_cycle_time) / clockrate;
     printf("Simulation duration:\t%f seconds\n", compute_time);
-  }
-
-
-
-  if (mpi_myrank == 0) {
     mpi_log_debug(" Simulation Complete!");
   }
 
@@ -218,15 +231,15 @@ void process_arguments(int argc, char* argv[]) {
   int ants = -1;
   int food = -1;
   double food_respawn = 0;
-  // Argument 1 is the number of threads to use
+  // Argument 1 is the number of threads to use per rank
   // Argument 2 is the size of matrix
   // Argument 3 is the number of ants
   // Argument 4 is the amount of food in the system 
   // Argument 5 is the food respawn chance.  It can be used to make the simulation endless, but should be left at 0 for now 
 
   // Check for 5 arguments
-  if (argc != 5) {
-    mpi_log_error("Usage: \n%s <num of threads> <matrix size> <num of ants> <num of food>\n", argv[0]);
+  if (argc != 6) {
+    mpi_log_error("Usage: %s <num of ants> <matrix size> <num of ants> <num of food>\n", argv[0]);
     exit(1);
   }
   else
@@ -234,7 +247,7 @@ void process_arguments(int argc, char* argv[]) {
     // Next, read in the number of threads
     mpi_log_debug("Read in number of threads: %s\n", argv[1]);
     threads = atoi(argv[1]);
-
+    
     // Read in the matrix size
     mpi_log_debug("Read in matrix size: %s\n", argv[2]);
     size = atoi(argv[2]);
@@ -282,29 +295,22 @@ void process_arguments(int argc, char* argv[]) {
       exit(1);
     }
 
-    // check if there are more threads than rows per rank! must reduce if so!
-    if (threads > size / mpi_commsize) {
-        mpi_log_debug("Detected 'threads = %d' greater than rows per thread in each rank\n", threads);
-        threads = size / mpi_commsize;
-        mpi_log_debug("Reducing number of threads per rank to %d\n", threads);
-    }
-
-    if (mpi_commsize > size) {
-      mpi_log_error("ERROR: Cannot have more ranks than rows in the matrix. Please try again.\n");
-      exit(1);
-    }
-
     // Time to set the globals.
     g_array_size = size;
-    g_num_threads = threads;
     g_num_ants = ants;
     g_total_food = food;
     g_food_thresh_hold = food_respawn;
+    g_num_threads = threads;
 
     // each rank owns some ants
     myNumAnts = g_num_ants / mpi_commsize;
-    if (mpi_myrank == mpi_commsize - 1)
-      myNumAnts += g_num_ants % mpi_commsize;
+    int modrem = g_num_ants % mpi_commsize;
+    if (mpi_myrank <modrem)
+      myNumAnts++;
+    my_array_size = g_array_size/mpi_commsize;
+    standard_array_size = my_array_size;
+    if (mpi_mpirank == mpi_commsize-1)
+        my_array_size+=g_array_size%mpi_commsize;
   }
 }
 
@@ -315,7 +321,10 @@ void process_arguments(int argc, char* argv[]) {
 
 void allocate_and_init_array()
 {
+  unsigned int numrows = g_array_size/mpi_commsize;
+  unsigned int rowstart = mpi_myrank*numrows;
   unsigned int row = 0;
+  unsigned int rowend = rowstart+my_array_size;
   unsigned int col = 0;
   unsigned int i;
   unsigned int foodheap = g_total_food/mpi_commsize;
@@ -323,35 +332,74 @@ void allocate_and_init_array()
   // each rank has a local copy of the world
   // ranks update their local copies, gasking only for the pieces of the world near their ants
 
-  g_worldGrid = calloc(g_array_size, sizeof(Cell *));
-  for (row = 0; row < g_array_size; row++)
+  MPI_Alloc_mem(sizeof(double*)*my_array_size,MPI_INFO_NULL, &g_localFoodGrid);
+  MPI_Alloc_mem(sizeof(int*)*my_array_size,MPI_INFO_NULL, &g_localPheremoneGrid);
+  MPI_Alloc_mem(sizeof(int*)*my_array_size,MPI_INFO_NULL, &g_localOccupancyGrid);
+  for (row = 0; row < my_array_size; row++)//rowstart; row < rowend; row++)
   {
-    g_worldGrid[row] = calloc(g_array_size, sizeof(Cell));
+  MPI_Alloc_mem(sizeof(double)*g_array_size,MPI_INFO_NULL, &(g_localFoodGrid[row]));
+  MPI_Alloc_mem(sizeof(int)*g_array_size,MPI_INFO_NULL, &(g_localPheremoneGrid[row]));
+  MPI_Alloc_mem(sizeof(int)*g_array_size,MPI_INFO_NULL, &(g_localOccupancyGrid[row]));
     for (col = 0; col < g_array_size; col++)
     {
-      g_worldGrid[row][col].foodRemaining = 0;
-      g_worldGrid[row][col].pheremoneLevel = 0;
-      g_worldGrid[row][col].occupancy = 0;
+      g_localFoodGrid[row][col] = 0;
+      g_localPheremoneGrid[row][col] = 0;
+      g_localOccupancyGrid[row][col] = 0;
     }
   }
+  MPI_Barrier( MPI_COMM_WORLD );
+  MPI_Win_allocate_shared(my_array_size*g_array_size*sizeof(double),sizeof(double),MPI_INFO_NULL,MPI_COMM_WORLD, &g_localFoodGrid,&winfood);
+  MPI_Win_allocate_shared(my_array_size*g_array_size*sizeof(int),sizeof(int),MPI_INFO_NULL,MPI_COMM_WORLD, &g_localPheremoneGrid,&winfood);
+  MPI_Win_allocate_shared(my_array_size*g_array_size*sizeof(int),sizeof(int),MPI_INFO_NULL,MPI_COMM_WORLD, &g_localOccupancyGrid,&winfood);
+  MPI_Win_fence(0,winfood);
+  MPI_Win_fence(0,winph);
+  MPI_Win_fence(0,winoc);
+  g_remoteFoodGrids=(double ***)malloc(mpi_commsize*sizeof(double **));
+  g_remotePheremoneGrids=(int ***)malloc(mpi_commsize*sizeof(int **));
+  g_remoteOccupancyGrids=(int ***)malloc(mpi_commsize*sizeof(int **));
+  for (i=0; i < mpi_commsize;i++)
+  {
+    if (i != mpi_myrank)
+    {
+      int sz, disp;
+      MPI_Win_shared_query(winfood,i,&sz, &disp, &(g_remoteFoodGrids[i]));
+      MPI_Win_shared_query(winph,i,&sz, &disp, &(g_remotePheremoneGrids[i]));
+      MPI_Win_shared_query(winoc,i,&sz, &disp, &(g_remoteOccupancyGrids[i]));
+    }
+    else
+    {
+      g_remoteFoodGrids[i]=g_localFoodGrid;
+      g_remotePheremoneGrids[i]=g_localPheremoneGrid;
+      g_remoteOccupancyGrids[i]=g_localOccupancyGrid;
+    }
+  }
+  MPI_Win_fence(0,winfood);
+  MPI_Win_fence(0,winph);
+  MPI_Win_fence(0,winoc);
+  
+  //place food pices at random
+  while (foodheap > 0){
+    //row = rowstart+(50*g_array_size*GenVal((mpi_myrank)%Maxgen))%(rowend-rowstart);
+    row = (50*g_array_size*GenVal((mpi_myrank)%Maxgen))%(my_array_size);
+    col = (50*g_array_size*GenVal((mpi_myrank)%Maxgen))%g_array_size;
+    g_localFoodGrid[row][col]+= 1;
+    foodheap--;
+  }
 
+  MPI_Barrier( MPI_COMM_WORLD );
   // initialize the ants
-  myAnts = calloc(myNumAnts, sizeof(Ant));
+  myAnts = malloc(myNumAnts*sizeof(Ant));
   for(i = 0; i < myNumAnts; i++)
   {
     myAnts[i].foodEaten = 0;
     myAnts[i].state = 0;
-    myAnts[i].x = (unsigned int) (GenAntVal(i) * g_array_size);
-    myAnts[i].y = (unsigned int) (GenAntVal(i) * g_array_size);
+    myAnts[i].x = (unsigned int) (GenVal(i) * g_array_size) % g_array_size;
+    myAnts[i].y = (unsigned int) (GenVal(i) * g_array_size) % g_array_size;
+    int rank = y/standard_array_size;
+    MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winoc);
+      MPI_Win_unlock(rank,winoc);
   }
-
-  // At most we can have myNumAnts*2 actions per tick.
-  // An ant moving will make two actions: a MOVE_TO and a MOVE_FROM
-  actionQueue = calloc(myNumAnts*2, sizeof(AntAction));
-  actionCount = 0;
-
-  // TODO: how do we distribute food?  
-  // Should be parallel deterministic, and needs to create an exact amount of food
+  tickcounts = (unsigned int *)calloc(g_num_threads+1,sizeof(unsigned int));
 }
 
 
@@ -359,19 +407,17 @@ void allocate_and_init_array()
 /* Function: run_farm ******************************************************/
 /***************************************************************************/
 
-void run_farm() {
+void *run_farm(void *pt) {
+  param_t p = (param_t *)pt;
+  int mystart = p->mystart;
+  int myend = p->myend;
+  pthread_mutex_t * antlock = p->antlock;
+  pthread_mutex_t * ticklock = p->ticklock;
+  int threadnum = p->threadnum;
   while (g_total_food > 1) 
   {
-    // update local copies of the world
-    exchange_cells_pre();
-    MPI_Barrier( MPI_COMM_WORLD );
-
     // run ant decisions
-    run_tick();
-    MPI_Barrier( MPI_COMM_WORLD );
-
-    // send ant decisions to world rank
-    exchange_cells_post();
+    run_tick(p);
     MPI_Barrier( MPI_COMM_WORLD );
 
     //every 5 ticks
@@ -380,23 +426,50 @@ void run_farm() {
       
       // world rank decrements any pheremone levels by 1
   }
+  free(p);
+  return NULL;
 }
 
 /***************************************************************************/
 /* Function: run_tick ******************************************************/
 /***************************************************************************/
 // run ant decisions
-void run_tick() {
+void run_tick(param_t * p) {
+  int mystart = p->mystart;
+  int myend = p->myend;
+  pthread_mutex_t * antlock = p->antlock;
+  pthread_mutex_t * ticklock = p->ticklock;
+  int threadnum = p->threadnum;
   unsigned int i,j;
   unsigned int x,y;
   unsigned int ny, ny;
   j = 0;
-  actionCount = 0;
   //loop through ants
-  for(i = 0; i < myNumAnts; i++)
+  for(i = mystart; i < myend; i++)
     {
       x = myAnts[i].x;
       y = myAnts[i].y;
+      /*START*/
+      double foodremaining;
+      int pheremoneLevel[3][3];
+      int occupancy;
+      int ranktop,rankmid,rankbottom;
+      ranktop = (y-1)/my_array_size;
+      rankmid = (y)/my_array_size;
+      rankbottom = (y+1)/my_array_size;
+      MPI_Win_lock(MPI_LOCK_EXCLUSIVE,ranktop,0,win);
+      MPI_Get(g_remoteGrids[ranktop],1,MPI_INT,);
+      MPI_Win_unlock(ranktop,win);
+      MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,win);
+      MPI_Win_unlock(rankmid,win);
+      MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankbottom,0,win);
+      MPI_Win_unlock(rankbottom,win);
+      MPI_Barrier( MPI_COMM_WORLD );
+      if (foodremaining > 0)
+      {
+        
+      }
+      /*END*/
     //if exists pheremone on current cell
       if (g_worldGrid[y][x].pheremoneLevel > 0)
       {
@@ -460,153 +533,6 @@ void run_tick() {
       }    
     }
 }
-
-
-/***************************************************************************/
-/* Function: exchange_cells_pre ************************************************/
-/***************************************************************************/
-// Ask world rank for rows
-// update only the rows nearby our ants
-void exchange_cells_pre() {
-  unsigned int i,j;
-  // The number of rows it needs from a rank
-  unsigned int numRowsNeeded = 0;
-  // Specifies which rows in the local copy it wants to update
-  unsigned int * rowsNeeded = calloc(g_array_size, sizeof(unsigned int *));
-  // Array of y values, specifying the requested rows.  Will only be numRowsNeeded in length
-  unsigned int * rankMessageArray = calloc(g_array_size, sizeof(unsigned int ));
-
-  if(mpi_myrank != 0)
-  {
-    // determine which rows we will request
-    for(i = 0; i < myNumAnts; i++)
-    {
-      for(j = myAnts[i].y - 1; j <= myAnts[i].y + 1; j++)
-      {
-        if(rowsNeeded[j % g_array_size] == FALSE)
-        {
-          rankMessageArray[numRowsNeeded] = j;
-          numRowsNeeded++;
-          rowsNeeded[j  % g_array_size] = TRUE;
-        }
-      }
-    }
-
-    MPI_Status status;
-    MPI_Request sendRequest1, recvRequest1;
-    // tell world rank how many rows we are requesting, and the row numbers
-    MPI_Isend(&numRowsNeeded, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
-    MPI_Isend(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
-
-    // receive the rows
-    MPI_Wait(&sendRequest1, &status);
-    for(j = 0; j < numRowsNeeded; j++)
-    {
-      MPI_Recv(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
-    }
-  }
-  else
-  {
-    // send the world rank's rows to the others
-    MPI_Status status;
-    for(i = 1; i < mpi_commsize; i++)
-    {
-      // determine what rows are requested
-      MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
-      MPI_Recv(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
-      // send the requested rows
-      for(j = 0; j < numRowsNeeded; j++)
-      {
-        MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD);
-      }
-    }
-  }
-  free(rowsNeeded);
-  free(rankMessageArray);
-}
-
-/***************************************************************************/
-/* Function: exchange_cells_post ************************************************/
-/***************************************************************************/
-// Send ant actions to world
-// Will use AntAction
-// TODO: should we make an eat action?  And how should it be done if we do
-void exchange_cells_post() {
-    unsigned int i, j;
-    MPI_Status status;
-    MPI_Request sendRequest1;
-    // tell world rank how many actions we are sending, and then send the actions
-    MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
-    MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &sendRequest1);
-
-    if(mpi_myrank == 0)
-    {
-      double food_left = g_worldGrid[y][x].foodRemaining;
-      // receive actions from all ranks
-      for(i = 0; i < mpi_commsize; i++)
-      {
-        // receive the number of actions in the queue
-        unsigned int receive_actionCount;
-        MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
-
-        //receive the action queue
-        AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));;
-        MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
-
-        // apply the effect of each action to the world
-        for(j = 0; j < receive_actionCount; j++)
-        {
-          unsigned int x = receive_actionQueue[j].x;
-          unsigned int y = receive_actionQueue[j].y;
-
-          switch(receive_actionQueue[j].action) {
-            case MOVE_TO:
-              g_worldGrid[y][x].occupancy++;
-              break;
-            case MOVE_FROM:
-              g_worldGrid[y][x].occupancy--;
-              break;
-            case SPRAY_PHEREMONE:
-              spray(x,y,15,5,1);
-              break;
-            case SPRAY_FOUND:
-              spray(x,y,5,5,1);
-              break;
-            case SPRAY_NEG:
-              spray(x,y,1,0,-1);
-              break;
-            case EAT:1
-              eat(x,y, food_left);
-              break;
-            default:
-              break;
-          }
-        }
-
-
-        free(receive_actionQueue);
-      }
-    }
-
-
-   actionCount = 0;
-}
-
-// generate a random value for the rank's nth row
-// each row has its own random stream
-double GenRowVal(unsigned int rowNumber)
-{
-  return GenVal(mpi_myrank * (g_array_size / mpi_commsize) + rowNumber);
-}ok 
-
-// generate a random value for the rank's nth ant
-// each ant has its own random stream
-double GenAntVal(unsigned int antNumber)
-{
-  // The first g_array_size values are reserved for each row's stream
-  return GenVal(g_array_size + mpi_myrank * (g_num_ants / mpi_commsize) + antNumber);
-}
-
 
 /***************************************************************************/
 /* Function: get_Time ******************************************************/
