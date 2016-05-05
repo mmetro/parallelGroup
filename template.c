@@ -397,7 +397,8 @@ void allocate_and_init_array()
     myAnts[i].y = (unsigned int) (GenVal(i) * g_array_size) % g_array_size;
     int rank = y/standard_array_size;
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winoc);
-      MPI_Win_unlock(rank,winoc);
+    MPI_Put(g_remoteOccupancyGrids[rank],1,MPI_INT,rank,sizeof(int),1,MPI_INT,winoc);
+    MPI_Win_unlock(rank,winoc);
   }
   tickcounts = (unsigned int *)calloc(g_num_threads+1,sizeof(unsigned int));
 }
