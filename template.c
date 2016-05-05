@@ -126,6 +126,8 @@ unsigned int actionCountMax;
 time_t start_cycle_time;
 time_t mid_cycle_time;
 
+int g_tick_counter = 0;
+
 
 /***************************************************************************/
 /* Function Decs ***********************************************************/
@@ -383,7 +385,6 @@ void allocate_and_init_array()
 void run_farm() {
   while (g_total_food > 1) 
   {
-    if (mpi_myrank == 0)  print_world();
     //if (mpi_myrank == 0)  print_world();
     // update local copies of the world
     exchange_cells_pre();
@@ -487,6 +488,7 @@ void run_tick() {
         queue_action(MOVE_FROM, x,y);
       }    
     }
+    g_tick_counter++;
 }
 
 
@@ -728,11 +730,19 @@ void check_highest_level(int x, int y, int * nx, int * ny)
 void print_world()
 {
   unsigned int i,j;
+  printf("--------\n");
   for(j = 0; j < g_array_size; j++)
   {
     for(i = 0; i < g_array_size; i++)
     {
-      printf("%2u", g_worldGrid[j][i].occupancy);
+      if(g_worldGrid[j][i].occupancy > 0)
+      {
+        printf("%2u", g_worldGrid[j][i].occupancy);
+      }
+      else
+      {
+        printf("_");
+      }
     }
     printf("\n");
   }
