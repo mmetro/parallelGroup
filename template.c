@@ -1,3 +1,10 @@
+/***************************************************************************/
+/* Template for Final Project **********************************************/
+/* Allen Wu                   **********************************************/
+/* Kainoa Eastlack            **********************************************/
+/* Michael Metrocavich        **********************************************/
+/* Nevin Jacob                **********************************************/
+/***************************************************************************/
 
 
 /***************************************************************************/
@@ -658,35 +665,29 @@ unsigned long long get_Time()
 
 //sprays pheremones on adjacent Cells
 // +1 for food, -1 for no food
+
+
 void spray(int x, int y, int high, int low, int type)
 {
   if (g_worldGrid[y][x].pheremoneLevel != 0 || type == 1)
   {
     g_worldGrid[y][x].pheremoneLevel += (high*type);  
-  }
-  
-  if (x != 0 && low !=0)
-  { 
-    g_worldGrid[y][x-1].pheremoneLevel += (low*type);
-    if (y != 0) 
-      { g_worldGrid[y-1][x-1].pheremoneLevel += (low*type); }
-    else if (y != g_array_size) 
-      { g_worldGrid[y+1][x-1].pheremoneLevel += (low*type);}
-    
-  }
-  else if (x != g_array_size && low !=0)
+  } 
+
+  if (low != 0)
   {
-    g_worldGrid[y][x+1].pheremoneLevel += (low*type);
-    if (y != 0) 
-      { g_worldGrid[y-1][x+1].pheremoneLevel += (low*type); }
-    else if (y != g_array_size) 
-      { g_worldGrid[y+1][x+1].pheremoneLevel += (low*type);}
+    g_worldGrid[y][(x+1)%g_array_size].pheremoneLevel += (low*type);
+    g_worldGrid[y][(x-1)%g_array_size].pheremoneLevel += (low*type);
+    g_worldGrid[(y-1)%g_array_size][x].pheremoneLevel += (low*type);
+    g_worldGrid[(y+1)%g_array_size][x].pheremoneLevel += (low*type);
+
+    g_worldGrid[(y-1)%g_array_size][(x+1)%g_array_size].pheremoneLevel += (low*type);
+    g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel += (low*type);
+    g_worldGrid[(y+1)%g_array_size][(x-1)%g_array_size].pheremoneLevel += (low*type);
+    g_worldGrid[(y+1)%g_array_size][(x+1)%g_array_size].pheremoneLevel += (low*type);
   }
-  if (y != 0 && low !=0)
-    { g_worldGrid[y-1][x].pheremoneLevel += (low*type); }
-  else if (y != g_array_size && low !=0)
-    { g_worldGrid[y+1][x].pheremoneLevel += (low*type); }
 }
+
 
 /***************************************************************************/
 /* Function: eat ***********************************************************/
@@ -719,6 +720,27 @@ void update_total_food()
 //finds highest pheremone level around x,y, or just x,y if already highest
 void check_highest_level(int x, int y, int * nx, int * ny)
 {
+  *nx = x;
+  *ny = y;
+  int max_level = g_worldGrid[y][x].pheremoneLevel;
+
+  if (g_worldGrid[y][(x+1)%g_array_size].pheremoneLevel > max_level) 
+    { max_level = g_worldGrid[y][(x+1)%g_array_size].pheremoneLevel; *nx = y; *nx = x+1;}
+  if (g_worldGrid[y][(x-1)%g_array_size].pheremoneLevel > max_level) 
+    { max_level = g_worldGrid[y][(x-1)%g_array_size].pheremoneLevel; *nx = y; *nx = x-1;}
+  if (g_worldGrid[(y-1)%g_array_size][x].pheremoneLevel > max_level) 
+    { max_level = g_worldGrid[(y-1)%g_array_size][x].pheremoneLevel; *nx = y-1; *nx = x;}
+  if (g_worldGrid[(y+1)%g_array_size][x].pheremoneLevel > max_level) 
+    { max_level = g_worldGrid[(y+1)%g_array_size][x].pheremoneLevel; *nx = y+1; *nx = x;}
+
+  if (g_worldGrid[(y-1)%g_array_size][(x+1)%g_array_size].pheremoneLevel > max_level) 
+    { max_level = g_worldGrid[(y-1)%g_array_size][(x+1)%g_array_size].pheremoneLevel; *nx = y-1; *nx = x+1;} 
+  if (g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel > max_level) 
+    { max_level g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel= ; *nx = y-1; *nx = x-1;} 
+  if (g_worldGrid[(y+1)%g_array_size][(x-1)%g_array_size].pheremoneLevel > max_level) 
+    { max_level = g_worldGrid[(y+1)%g_array_size][(x-1)%g_array_size].pheremoneLevel; *nx = y+1; *nx = x-1;} 
+  if (g_worldGrid[(y+1)%g_array_size][(x+1)%g_array_size].pheremoneLevel > max_level) 
+    { max_level = g_worldGrid[(y+1)%g_array_size][(x+1)%g_array_size].pheremoneLevel; *nx = y+1; *nx = x+1;} 
 
 }
 
