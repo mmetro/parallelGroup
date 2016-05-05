@@ -164,6 +164,9 @@ void eat(int x, int y, double food_left);
 void check_highest_level(int x, int y, int * nx, int * ny);
 void queue_action(ActionType action, unsigned int x, unsigned int y);
 
+// IO
+void print_world();
+
 // Timing
 unsigned long long get_Time();
 
@@ -185,27 +188,35 @@ int main(int argc, char *argv[])
   MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
   MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
 
-  if (mpi_myrank == 0) {
-    start_time = get_Time();
-  }
-
+  
 // Init 16,384 RNG streams - each row and each ant has an independent stream
   InitDefault();
 
   printf("Rank %d of %d started.\n", mpi_myrank, mpi_commsize);
 
+  MPI_Barrier( MPI_COMM_WORLD );
   // Read in and process the remaining arguments.
   process_arguments(argc, argv);
 
+  MPI_Barrier( MPI_COMM_WORLD );
   // Allocate the chunk of the universe that we need for this rank, and
   // randomly initialize the values in that chunk using the proper RNG stream
   // for that chunk.
   allocate_and_init_array();
-  if (mpi_myrank == 0)  print_world();
-
-  printf("Initialization complete. Ant farm started...\n\n");
 
   MPI_Barrier( MPI_COMM_WORLD );
+
+  if (mpi_myrank == 0)  {
+    print_world();
+    printf("Initialization complete. Ant farm started...\n\n");
+  };
+
+  MPI_Barrier( MPI_COMM_WORLD );
+
+
+  if (mpi_myrank == 0) {
+    start_time = get_Time();
+  }
 
   //Run simulation 
   run_farm();  
@@ -259,23 +270,23 @@ void process_arguments(int argc, char* argv[]) {
   else
   {
     // Next, read in the number of threads
-    printf("Read in number of threads: %s\n", argv[1]);
+    if (mpi_myrank == 0) printf("Read in number of threads: %s\n", argv[1]);
     threads = atoi(argv[1]);
 
     // Read in the matrix size
-    printf("Read in matrix size: %s\n", argv[2]);
+    if (mpi_myrank == 0) printf("Read in matrix size: %s\n", argv[2]);
     size = atoi(argv[2]);
 
     // Read in the number of ants
-    printf("Read in number of ants: %s\n", argv[3]);
+    if (mpi_myrank == 0) printf("Read in number of ants: %s\n", argv[3]);
     ants = atoi(argv[3]);
 
     // Read in the total amount of food
-    printf("Read in amount of food: %s\n", argv[4]);
+    if (mpi_myrank == 0) printf("Read in amount of food: %s\n", argv[4]);
     food = atoi(argv[4]);
 
     // Read in the food respawn chance
-    printf("Read in food respawn chance %s\n", argv[5]);
+    if (mpi_myrank == 0) printf("Read in food respawn chance %s\n", argv[5]);
     food_respawn = ((double)atoi(argv[5])) / 100.0;
 
     if (size <= 0)
@@ -346,6 +357,7 @@ void allocate_and_init_array()
   unsigned int col = 0;
   unsigned int i;
   unsigned int foodheap = g_total_food/mpi_commsize;
+  unsigned int alloc_food = 0;
 
   // At most we can have myNumAnts*2 actions per tick.
   // An ant moving will make two actions: a MOVE_TO and a MOVE_FROM
@@ -362,7 +374,24 @@ void allocate_and_init_array()
     g_worldGrid[row] = calloc(g_array_size, sizeof(Cell));
     for (col = 0; col < g_array_size; col++)
     {
-      g_worldGrid[row][col].foodRemaining = 0;
+      if (foodheap > 0)
+      {
+        if (GenVal(row*col) < 0.25)
+        {
+          alloc_food =  (unsigned int)(foodheap/g_array_size);
+          if (foodheap > alloc_food)
+          {
+            g_worldGrid[row][col].foodRemaining = alloc_food;
+            foodheap -= alloc_food;
+          }
+          else
+          {
+            g_worldGrid[row][col].foodRemaining = foodheap;
+            foodheap = 0;
+          }
+        }
+      }
+      
       g_worldGrid[row][col].pheremoneLevel = 0;
       g_worldGrid[row][col].occupancy = 0;
     }
@@ -378,7 +407,7 @@ void allocate_and_init_array()
     myAnts[i].y = (unsigned int) (GenAntVal(i) * g_array_size);
     queue_action(MOVE_TO, myAnts[i].x, myAnts[i].y);
   }
-
+  printf("Rank %d init  %d ants.\n", mpi_myrank, myNumAnts);
   exchange_cells_post();
   // TODO: how do we distribute food?  
   // Should be parallel deterministic, and needs to create an exact amount of food
@@ -390,6 +419,7 @@ void allocate_and_init_array()
 /***************************************************************************/
 
 void run_farm() {
+  int ticks = 0;
   while (g_total_food > 1) 
   {
     //if (mpi_myrank == 0)  print_world();
@@ -401,18 +431,19 @@ void run_farm() {
     // run ant decisions
     run_tick();
     MPI_Barrier( MPI_COMM_WORLD );
-
+    // if (mpi_myrank == 0) { printf("RAN TICK\n");};
     //if (mpi_myrank == 0)  print_world();
     // send ant decisions to world rank
     exchange_cells_post();
-    MPI_Barrier( MPI_COMM_WORLD );
-
-    //if (mpi_myrank == 0)  print_world();
+    MPI_Barrier( MPI_COMM_WORLD );;
+    if (mpi_myrank == 0)  print_world();
     //every 5 ticks
-      // update_total_food()
-      // world rank sends g_total_food to ranks 
-      
-      // world rank decrements any pheremone levels by 1
+    if (ticks % 5 == 0)
+    {
+      update_total_food();
+    }
+    MPI_Barrier( MPI_COMM_WORLD );
+    // if (mpi_myrank == 0) { printf("RAN ITERATION\n");};
   }
 }
 
@@ -425,7 +456,7 @@ void run_tick() {
   unsigned int x,y;
   unsigned int nx, ny;
   AntAction aa;
-
+  // printf("%d running \n", i);
   //loop through ants
   for(i = 0; i < myNumAnts; i++)
     {
@@ -440,6 +471,7 @@ void run_tick() {
         {
           myAnts[i].state = EATING;
           //EAT FOOD
+          // printf("%d is EATING \n", i);
           queue_action(EAT, x, y);
         
           //if enough food
@@ -485,14 +517,26 @@ void run_tick() {
       }
       else
       {
-        //MOVE random
-        myAnts[i].state = NOTHING;
-        nx = ((int)(x + GenAntVal(i)*3 -2))%g_array_size;
-        ny = ((int)(y + GenAntVal(i)*3 -2))%g_array_size;
-        myAnts[i].x = nx;
-        myAnts[i].y = ny;
-        queue_action(MOVE_TO, nx,ny);
-        queue_action(MOVE_FROM, x,y);
+        //if exists food 
+        if (g_worldGrid[y][x].foodRemaining > 0)
+        {
+          myAnts[i].state = EATING;
+          //EAT FOOD
+          printf("%d is EATING \n", i);
+          queue_action(EAT, x, y);
+          queue_action(SPRAY_PHEREMONE, x, y);
+        }
+        else
+        {
+          //MOVE random
+          myAnts[i].state = NOTHING;
+          nx = ((int)(x + GenAntVal(i)*3 -2))%g_array_size;
+          ny = ((int)(y + GenAntVal(i)*3 -2))%g_array_size;
+          myAnts[i].x = nx;
+          myAnts[i].y = ny;
+          queue_action(MOVE_TO, nx,ny);
+          queue_action(MOVE_FROM, x,y);
+        }
       }    
     }
     g_tick_counter++;
@@ -711,7 +755,19 @@ void eat(int x, int y, double food_left)
 //world rank sends remaining total to all ranks 
 void update_total_food()
 {
+  int i;
+  if (mpi_myrank == 0)
+  {
+    MPI_Request sendRequest1;
+    for(i = 0; i < mpi_commsize; i++)
+    {
+      MPI_Isend(&g_total_food, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &sendRequest1);
+    }    
+    printf("%d food left\n", g_total_food);
+  }
 
+  MPI_Status status;
+  MPI_Recv(&g_total_food, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &status);
 }
 
 /***************************************************************************/
@@ -736,7 +792,7 @@ void check_highest_level(int x, int y, int * nx, int * ny)
   if (g_worldGrid[(y-1)%g_array_size][(x+1)%g_array_size].pheremoneLevel > max_level) 
     { max_level = g_worldGrid[(y-1)%g_array_size][(x+1)%g_array_size].pheremoneLevel; *nx = y-1; *nx = x+1;} 
   if (g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel > max_level) 
-    { max_level g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel= ; *nx = y-1; *nx = x-1;} 
+    { max_level = g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel ; *nx = y-1; *nx = x-1;} 
   if (g_worldGrid[(y+1)%g_array_size][(x-1)%g_array_size].pheremoneLevel > max_level) 
     { max_level = g_worldGrid[(y+1)%g_array_size][(x-1)%g_array_size].pheremoneLevel; *nx = y+1; *nx = x-1;} 
   if (g_worldGrid[(y+1)%g_array_size][(x+1)%g_array_size].pheremoneLevel > max_level) 
@@ -763,7 +819,11 @@ void print_world()
       }
       else
       {
-        printf("_");
+        if (g_worldGrid[j][i].foodRemaining > 0){
+          printf("++");  
+        }
+        else
+          printf("__");
       }
     }
     printf("\n");
