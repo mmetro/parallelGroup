@@ -756,6 +756,7 @@ void eat(int x, int y, double food_left)
 void update_total_food()
 {
   int i;
+  int temp_total_food;
   if (mpi_myrank == 0)
   {
     MPI_Request sendRequest1;
@@ -771,7 +772,8 @@ void update_total_food()
   }
 
   MPI_Status status;
-  MPI_Recv(&g_total_food, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &status);
+  MPI_Recv(&temp_total_food, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &status);
+  g_total_food = temp_total_food;
 }
 
 /***************************************************************************/
