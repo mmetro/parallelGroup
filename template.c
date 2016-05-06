@@ -66,11 +66,8 @@ typedef struct param_t{
 /***************************************************************************/
 
 double ** g_localFoodGrid;
-double *** g_remoteFoodGrids;
 double ** g_localPheremoneGrid;
-double *** g_remotePheremoneGrids;
 int ** g_localOccupancyGrid;
-int *** g_remoteOccupancyGrids;
 MPI_Win winfood, winph, winoc;
 unsigned int * tickcounts;
 
@@ -79,7 +76,7 @@ unsigned int my_array_size = 0;
 unsigned int standard_array_size = 0;
 int g_num_threads = 0;
 int g_num_ants = 0;
-int g_total_food = 0;
+unsigned int g_total_food = 0;
 
 double g_food_thresh_hold = 0.0;
 
@@ -112,7 +109,6 @@ void *run_farm( void * pt);
 
 //run one iteration
 void run_tick(param_t * p);
-void update_total_food();
 
 
 // helper functions
@@ -168,7 +164,7 @@ int main(int argc, char *argv[])
   pthread_mutex_t ticklock;//lock for editing/checking progress
   pthread_mutex_init(&foodlock, NULL);
   pthread_mutex_init(&ticklock, NULL);
-  int ants_per_thread = myNumAnts/g_num_threads;
+  int ants_per_thread = myNumAnts/(g_num_threads+1);
   pthread_t pthreads[g_num_threads];//keep track of each thread
   for (i = 0; i < g_num_threads;i++){
     param_t * p = (param_t *)malloc(1*sizeof(param_t));
@@ -299,6 +295,7 @@ void process_arguments(int argc, char* argv[]) {
     standard_array_size = my_array_size;
     if (mpi_myrank == mpi_commsize-1)
         my_array_size+=g_array_size%mpi_commsize;
+    printf("Rank %d: standardarrsize=%u\n",mpi_myrank,standard_array_size);
   }
 }
 
@@ -330,9 +327,11 @@ void allocate_and_init_array()
   MPI_Alloc_mem(sizeof(int)*g_array_size,MPI_INFO_NULL, &(g_localOccupancyGrid[row]));
     for (col = 0; col < g_array_size; col++)
     {
+      //printf("Rank %d: initializing (%u,%u) out of (%u,%u)...\n",mpi_myrank,row,col, my_array_size,g_array_size);
       g_localFoodGrid[row][col] = 0;
       g_localPheremoneGrid[row][col] = 0;
       g_localOccupancyGrid[row][col] = 0;
+      //printf("Rank %d: initialized (%u,%u) out of (%u,%u) to f=%lf,ph=%lf,o=%d...\n",mpi_myrank,row,col, my_array_size,g_array_size, g_localFoodGrid[row][col], g_localPheremoneGrid[row][col], g_localOccupancyGrid[row][col]);
     }
   }
   MPI_Barrier( MPI_COMM_WORLD );
@@ -342,38 +341,26 @@ void allocate_and_init_array()
   MPI_Win_fence(0,winfood);
   MPI_Win_fence(0,winph);
   MPI_Win_fence(0,winoc);
-  g_remoteFoodGrids=(double ***)malloc(mpi_commsize*sizeof(double **));
-  g_remotePheremoneGrids=(double ***)malloc(mpi_commsize*sizeof(double **));
-  g_remoteOccupancyGrids=(int ***)malloc(mpi_commsize*sizeof(int **));
-  for (i=0; i < mpi_commsize;i++)
-  {
-    if (i != mpi_myrank)
-    {
-      MPI_Aint sz;
-      int disp;
-      MPI_Win_shared_query(winfood,i,&sz, &disp, &(g_remoteFoodGrids[i]));
-      MPI_Win_shared_query(winph,i,&sz, &disp, &(g_remotePheremoneGrids[i]));
-      MPI_Win_shared_query(winoc,i,&sz, &disp, &(g_remoteOccupancyGrids[i]));
-    }
-    else
-    {
-      g_remoteFoodGrids[i]=g_localFoodGrid;
-      g_remotePheremoneGrids[i]=g_localPheremoneGrid;
-      g_remoteOccupancyGrids[i]=g_localOccupancyGrid;
-    }
-  }
-  MPI_Win_fence(0,winfood);
-  MPI_Win_fence(0,winph);
-  MPI_Win_fence(0,winoc);
+  printf("Rank %d: allocated and shared memory\n",mpi_myrank);
   
   //place food pices at random
   while (foodheap > 0){
     //row = rowstart+(50*g_array_size*GenVal((mpi_myrank)%Maxgen))%(rowend-rowstart);
-    row = ((int)(50*g_array_size*GenVal((mpi_myrank)%Maxgen)))%(my_array_size);
-    col = ((int)(50*g_array_size*GenVal((mpi_myrank)%Maxgen)))%g_array_size;
-    g_localFoodGrid[row][col]+= 1;
+    row = ((unsigned int)(50*g_array_size*GenVal((mpi_myrank)%Maxgen)))%(my_array_size);
+    col = ((unsigned int)(50*g_array_size*GenVal((mpi_myrank)%Maxgen)))%g_array_size;
+    printf("Rank %d: placing food at (%u,%u) out of (%u,%u)...\n",mpi_myrank,row,col, my_array_size,g_array_size);
+    MPI_Win_lock(MPI_LOCK_EXCLUSIVE,mpi_myrank,0,winfood);
+    MPI_Win_fence(0,winfood);
+    int currentfood;
+    MPI_Get(&currentfood,1,MPI_INT,mpi_myrank,row*g_array_size+col,1,MPI_INT,winfood);
+    currentfood++;
+    MPI_Put(&currentfood,1,MPI_INT,mpi_myrank,row*g_array_size+col,1,MPI_INT,winfood);
+    MPI_Win_unlock(mpi_myrank,winfood);
+    MPI_Win_fence(0,winfood);
+    printf("Rank %d: placed food at (%u,%u) out of (%u,%u).\n",mpi_myrank,row,col, my_array_size,g_array_size);
     foodheap--;
   }
+  printf("Rank %d: allocated food\n",mpi_myrank);
 
   MPI_Barrier( MPI_COMM_WORLD );
   // initialize the ants
@@ -396,7 +383,9 @@ void allocate_and_init_array()
     MPI_Win_unlock(rank,winoc);
     MPI_Win_fence(0,winoc);
   }
+  printf("Rank %d: initialized ants\n",mpi_myrank);
   tickcounts = (unsigned int *)calloc(g_num_threads+1,sizeof(unsigned int));
+  printf("Rank %d: initialized tickcounts\n",mpi_myrank);
 }
 
 
@@ -411,7 +400,10 @@ void *run_farm(void *pt) {
   pthread_mutex_t * foodlock = p->foodlock;
   pthread_mutex_t * ticklock = p->ticklock;
   int threadnum = p->threadnum;
-  while (g_total_food > 0) 
+  pthread_mutex_lock(foodlock);
+  unsigned int total_food = g_total_food;
+  pthread_mutex_unlock(foodlock);
+  while (total_food > 0) 
   {
     // run ant decisions
     run_tick(p);
@@ -421,6 +413,7 @@ void *run_farm(void *pt) {
       unsigned int myprogress = ++tickcounts[threadnum];
       unsigned int mainprogress = tickcounts[g_num_threads];
       pthread_mutex_unlock(ticklock); 
+      printf("Rank %d: Thread %d waiting on main.\n",mpi_myrank, threadnum);
       while (myprogress!=mainprogress)
       {
         pthread_mutex_lock(ticklock);
@@ -434,11 +427,12 @@ void *run_farm(void *pt) {
       pthread_mutex_lock(ticklock);
       unsigned int finished = tickcounts[g_num_threads]+1;
       pthread_mutex_unlock(ticklock); 
-      for (i = 0; i < g_num_threads-1;i++)
+      for (i = 0; i < g_num_threads;i++)
       {
         pthread_mutex_lock(ticklock);
         unsigned int threadprogress = tickcounts[i];
         pthread_mutex_unlock(ticklock); 
+        printf("Rank %d: main waiting on thread %d.\n",mpi_myrank,i);
         while(threadprogress != finished)
         {
           pthread_mutex_lock(ticklock);
@@ -450,7 +444,14 @@ void *run_farm(void *pt) {
       pthread_mutex_lock(ticklock);
       tickcounts[g_num_threads]++;
       pthread_mutex_unlock(ticklock); 
+      pthread_mutex_lock(foodlock);
+      total_food = g_total_food;
+      pthread_mutex_unlock(foodlock);
+      printf("Rank %d: tick %u complete. %u food remaining.\n",mpi_myrank,finished,total_food);
     }
+    pthread_mutex_lock(foodlock);
+    total_food = g_total_food;
+    pthread_mutex_unlock(foodlock);
   }
   free(p);
   return NULL;
@@ -490,6 +491,7 @@ void run_tick(param_t * p) {
         xend++;
       unsigned int arraylen=xend-xstart+1;
       int arraystart=xstart-x+1;
+      printf("Rank %d: threadnum %d check ranks %d,%d,%d since y = %u and sas=%u\n",mpi_myrank,threadnum,ranktop,rankmid,rankbottom,y,standard_array_size);
       
       MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,winoc);
       MPI_Win_fence(0,winoc);
@@ -548,7 +550,7 @@ void run_tick(param_t * p) {
       {
         myAnts[i].foodEaten++;
         pthread_mutex_lock(foodlock);
-        g_total_food--;
+        g_total_food-=occupancy;
         pthread_mutex_unlock(foodlock);
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,winfood);
         MPI_Win_fence(0,winfood);
