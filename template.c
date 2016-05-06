@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
 // Init 16,384 RNG streams - each row and each ant has an independent stream
   InitDefault();
 
-  //mpi_log_debug("Rank %d of %d started.\n", mpi_myrank, mpi_commsize);
+  printf("Rank %d of %d started.\n", mpi_myrank, mpi_commsize);
 
   // Read in and process the remaining arguments.
   process_arguments(argc, argv);
@@ -160,7 +160,7 @@ int main(int argc, char *argv[])
 
   MPI_Barrier( MPI_COMM_WORLD );
 
-  //mpi_log_debug("Rank %d: Initialization complete. Ant farm started...\n", mpi_myrank);
+  printf("Rank %d: Initialization complete. Ant farm started...\n", mpi_myrank);
 
   //Run simulation 
   int i;
@@ -197,7 +197,7 @@ int main(int argc, char *argv[])
 
     compute_time = (end_time - start_time) / clockrate;
     printf("Simulation duration:\t%f seconds\n", compute_time);
-    //mpi_log_debug(" Simulation Complete!");
+    printf(" Simulation Complete!");
   }
 
 
@@ -226,60 +226,60 @@ void process_arguments(int argc, char* argv[]) {
   // Argument 5 is the food respawn chance.  It can be used to make the simulation endless, but should be left at 0 for now 
 
   // Check for 5 arguments
-  if (argc != 6) {
-    //mpi_log_error("Usage: %s <num of ants> <matrix size> <num of ants> <num of food>\n", argv[0]);
+  if (argc != 5) {
+    printf("Usage: %s <num of threads> <matrix size> <num of ants> <num of food>\n", argv[0]);
     exit(1);
   }
   else
   {
     // Next, read in the number of threads
-    //mpi_log_debug("Read in number of threads: %s\n", argv[1]);
+    printf("Read in number of threads: %s\n", argv[1]);
     threads = atoi(argv[1]);
     
     // Read in the matrix size
-    //mpi_log_debug("Read in matrix size: %s\n", argv[2]);
+    printf("Read in matrix size: %s\n", argv[2]);
     size = atoi(argv[2]);
 
     // Read in the number of ants
-    //mpi_log_debug("Read in number of ants: %s\n", argv[3]);
+    printf("Read in number of ants: %s\n", argv[3]);
     ants = atoi(argv[3]);
 
     // Read in the total amount of food
-    //mpi_log_debug("Read in amount of food: %s\n", argv[4]);
+    printf("Read in amount of food: %s\n", argv[4]);
     food = atoi(argv[4]);
 
     // Read in the food respawn chance
-    //mpi_log_debug("Read in food respawn chance %s\n", argv[5]);
-    food_respawn = ((double)atoi(argv[5])) / 100.0;
-
+    //printf("Read in food respawn chance %s\n", argv[5]);
+    //food_respawn = ((double)atoi(argv[5])) / 100.0;
+    
     if (size <= 0)
     {
-      //mpi_log_debug("Matrix size not defined, setting to defined value: %u.\n", __MATRIX_SIZE__);
+      printf("Matrix size not defined, setting to defined value: %u.\n", __MATRIX_SIZE__);
       size = __MATRIX_SIZE__;
     }
 
     // Validate this input, and then save it in the global variables
     if (threads < 0)
     {
-      //mpi_log_error("ERROR: Number of threads less than 0. Please try again.\n");
+      printf("ERROR: Number of threads less than 0. Please try again.\n");
       exit(1);
     }
 
     if (ants <= 0)
     {
-      //mpi_log_error("ERROR: Cannot have less than 1 ant.\n");
+      printf("ERROR: Cannot have less than 1 ant.\n");
       exit(1);
     }
 
     if (food <= 0)
     {
-      //mpi_log_error("ERROR: Cannot have less than 1 food.\n");
+      printf("ERROR: Cannot have less than 1 food.\n");
       exit(1);
     }
 
     if (food_respawn < 0.0 || food_respawn > 1.0)
     {
-      //mpi_log_error("ERROR: Food respawn rate must be between 0 and 100 percent.\n");
+      printf("ERROR: Food respawn rate must be between 0 and 100 percent.\n");
       exit(1);
     }
 
@@ -337,8 +337,8 @@ void allocate_and_init_array()
   }
   MPI_Barrier( MPI_COMM_WORLD );
   MPI_Win_allocate_shared(my_array_size*g_array_size*sizeof(double),sizeof(double),MPI_INFO_NULL,MPI_COMM_WORLD, &g_localFoodGrid,&winfood);
-  MPI_Win_allocate_shared(my_array_size*g_array_size*sizeof(double),sizeof(int),MPI_INFO_NULL,MPI_COMM_WORLD, &g_localPheremoneGrid,&winfood);
-  MPI_Win_allocate_shared(my_array_size*g_array_size*sizeof(int),sizeof(int),MPI_INFO_NULL,MPI_COMM_WORLD, &g_localOccupancyGrid,&winfood);
+  MPI_Win_allocate_shared(my_array_size*g_array_size*sizeof(double),sizeof(int),MPI_INFO_NULL,MPI_COMM_WORLD, &g_localPheremoneGrid,&winph);
+  MPI_Win_allocate_shared(my_array_size*g_array_size*sizeof(int),sizeof(int),MPI_INFO_NULL,MPI_COMM_WORLD, &g_localOccupancyGrid,&winoc);
   MPI_Win_fence(0,winfood);
   MPI_Win_fence(0,winph);
   MPI_Win_fence(0,winoc);
