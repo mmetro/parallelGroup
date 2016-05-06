@@ -20,7 +20,7 @@
 /***************************************************************************/
 
 // Define if running not on the BGQ
-// #define __LOCAL__
+ #define __LOCAL__
 
 
 // This gets clock cycle count locally
@@ -59,17 +59,6 @@ typedef struct param_t{
 	pthread_mutex_t * ticklock;
 	int threadnum;
 } param_t;
-
-// MOVE_TO: increments a cell's occupancy
-// MOVE_FROM: decrements a cell's occupancy
-// SPRAY_PHEREMONE: increment pheremone levels
-// no eat action, because it's assumed ants will always eat
-// TODO: maybe make an EAT action
-typedef enum e_ActionType
-{
-    MOVE_TO, MOVE_FROM, SPRAY_PHEREMONE, SPRAY_FOUND, SPRAY_NEG, EAT;
-
-} ActionType;
 
 
 /***************************************************************************/
@@ -159,7 +148,7 @@ int main(int argc, char *argv[])
 // Init 16,384 RNG streams - each row and each ant has an independent stream
   InitDefault();
 
-  mpi_log_debug("Rank %d of %d started.\n", mpi_myrank, mpi_commsize);
+  //mpi_log_debug("Rank %d of %d started.\n", mpi_myrank, mpi_commsize);
 
   // Read in and process the remaining arguments.
   process_arguments(argc, argv);
@@ -171,7 +160,7 @@ int main(int argc, char *argv[])
 
   MPI_Barrier( MPI_COMM_WORLD );
 
-  mpi_log_debug("Rank %d: Initialization complete. Ant farm started...\n", mpi_myrank);
+  //mpi_log_debug("Rank %d: Initialization complete. Ant farm started...\n", mpi_myrank);
 
   //Run simulation 
   int i;
@@ -180,7 +169,7 @@ int main(int argc, char *argv[])
   pthread_mutex_init(&foodlock, NULL);
   pthread_mutex_init(&ticklock, NULL);
   int ants_per_thread = myNumAnts/g_num_threads;
-  pthread_t p[g_num_threads];//keep track of each thread
+  pthread_t pthreads[g_num_threads];//keep track of each thread
   for (i = 0; i < g_num_threads;i++){
     param_t * p = (param_t *)malloc(1*sizeof(param_t));
     p->mystart=ants_per_thread*i;
@@ -188,7 +177,7 @@ int main(int argc, char *argv[])
     p->foodlock = &foodlock;
     p->ticklock = &ticklock;
     p->threadnum = i;
-    pthread_create(&(p[i-1]), NULL,run_farm,(void *)p); 
+    pthread_create(&(pthreads[i]), NULL,run_farm,(void *)p); 
   }
   param_t * p = (param_t *)malloc(1*sizeof(param_t));
   p->mystart=ants_per_thread*g_num_threads;
@@ -204,11 +193,11 @@ int main(int argc, char *argv[])
   pthread_mutex_destroy(&ticklock);
 
   if (mpi_myrank == 0) {
-    mid_cycle_time = get_cycles();
+    end_time = time(NULL);//get_cycles();
 
-    compute_time = (mid_cycle_time - start_cycle_time) / clockrate;
+    compute_time = (end_time - start_time) / clockrate;
     printf("Simulation duration:\t%f seconds\n", compute_time);
-    mpi_log_debug(" Simulation Complete!");
+    //mpi_log_debug(" Simulation Complete!");
   }
 
 
@@ -238,59 +227,59 @@ void process_arguments(int argc, char* argv[]) {
 
   // Check for 5 arguments
   if (argc != 6) {
-    mpi_log_error("Usage: %s <num of ants> <matrix size> <num of ants> <num of food>\n", argv[0]);
+    //mpi_log_error("Usage: %s <num of ants> <matrix size> <num of ants> <num of food>\n", argv[0]);
     exit(1);
   }
   else
   {
     // Next, read in the number of threads
-    mpi_log_debug("Read in number of threads: %s\n", argv[1]);
+    //mpi_log_debug("Read in number of threads: %s\n", argv[1]);
     threads = atoi(argv[1]);
     
     // Read in the matrix size
-    mpi_log_debug("Read in matrix size: %s\n", argv[2]);
+    //mpi_log_debug("Read in matrix size: %s\n", argv[2]);
     size = atoi(argv[2]);
 
     // Read in the number of ants
-    mpi_log_debug("Read in number of ants: %s\n", argv[3]);
+    //mpi_log_debug("Read in number of ants: %s\n", argv[3]);
     ants = atoi(argv[3]);
 
     // Read in the total amount of food
-    mpi_log_debug("Read in amount of food: %s\n", argv[4]);
+    //mpi_log_debug("Read in amount of food: %s\n", argv[4]);
     food = atoi(argv[4]);
 
     // Read in the food respawn chance
-    mpi_log_debug("Read in food respawn chance %s\n", argv[5]);
+    //mpi_log_debug("Read in food respawn chance %s\n", argv[5]);
     food_respawn = ((double)atoi(argv[5])) / 100.0;
 
     if (size <= 0)
     {
-      mpi_log_debug("Matrix size not defined, setting to defined value: %u.\n", __MATRIX_SIZE__);
+      //mpi_log_debug("Matrix size not defined, setting to defined value: %u.\n", __MATRIX_SIZE__);
       size = __MATRIX_SIZE__;
     }
 
     // Validate this input, and then save it in the global variables
     if (threads < 0)
     {
-      mpi_log_error("ERROR: Number of threads less than 0. Please try again.\n");
+      //mpi_log_error("ERROR: Number of threads less than 0. Please try again.\n");
       exit(1);
     }
 
     if (ants <= 0)
     {
-      mpi_log_error("ERROR: Cannot have less than 1 ant.\n");
+      //mpi_log_error("ERROR: Cannot have less than 1 ant.\n");
       exit(1);
     }
 
     if (food <= 0)
     {
-      mpi_log_error("ERROR: Cannot have less than 1 food.\n");
+      //mpi_log_error("ERROR: Cannot have less than 1 food.\n");
       exit(1);
     }
 
     if (food_respawn < 0.0 || food_respawn > 1.0)
     {
-      mpi_log_error("ERROR: Food respawn rate must be between 0 and 100 percent.\n");
+      //mpi_log_error("ERROR: Food respawn rate must be between 0 and 100 percent.\n");
       exit(1);
     }
 
@@ -308,7 +297,7 @@ void process_arguments(int argc, char* argv[]) {
       myNumAnts++;
     my_array_size = g_array_size/mpi_commsize;
     standard_array_size = my_array_size;
-    if (mpi_mpirank == mpi_commsize-1)
+    if (mpi_myrank == mpi_commsize-1)
         my_array_size+=g_array_size%mpi_commsize;
   }
 }
@@ -354,13 +343,14 @@ void allocate_and_init_array()
   MPI_Win_fence(0,winph);
   MPI_Win_fence(0,winoc);
   g_remoteFoodGrids=(double ***)malloc(mpi_commsize*sizeof(double **));
-  g_remotePheremoneGrids=(int ***)malloc(mpi_commsize*sizeof(double **));
+  g_remotePheremoneGrids=(double ***)malloc(mpi_commsize*sizeof(double **));
   g_remoteOccupancyGrids=(int ***)malloc(mpi_commsize*sizeof(int **));
   for (i=0; i < mpi_commsize;i++)
   {
     if (i != mpi_myrank)
     {
-      int sz, disp;
+      MPI_Aint sz;
+      int disp;
       MPI_Win_shared_query(winfood,i,&sz, &disp, &(g_remoteFoodGrids[i]));
       MPI_Win_shared_query(winph,i,&sz, &disp, &(g_remotePheremoneGrids[i]));
       MPI_Win_shared_query(winoc,i,&sz, &disp, &(g_remoteOccupancyGrids[i]));
@@ -379,8 +369,8 @@ void allocate_and_init_array()
   //place food pices at random
   while (foodheap > 0){
     //row = rowstart+(50*g_array_size*GenVal((mpi_myrank)%Maxgen))%(rowend-rowstart);
-    row = (50*g_array_size*GenVal((mpi_myrank)%Maxgen))%(my_array_size);
-    col = (50*g_array_size*GenVal((mpi_myrank)%Maxgen))%g_array_size;
+    row = ((int)(50*g_array_size*GenVal((mpi_myrank)%Maxgen)))%(my_array_size);
+    col = ((int)(50*g_array_size*GenVal((mpi_myrank)%Maxgen)))%g_array_size;
     g_localFoodGrid[row][col]+= 1;
     foodheap--;
   }
@@ -394,6 +384,8 @@ void allocate_and_init_array()
     myAnts[i].state = 0;
     myAnts[i].x = (unsigned int) (GenVal(i%Maxgen) * g_array_size) % g_array_size;
     myAnts[i].y = (unsigned int) (GenVal(i%Maxgen) * g_array_size) % g_array_size;
+    unsigned int x = myAnts[i].x;
+    unsigned int y = myAnts[i].y;
     int rank = y/standard_array_size;
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winoc);
     MPI_Win_fence(0,winoc);
@@ -413,7 +405,7 @@ void allocate_and_init_array()
 /***************************************************************************/
 
 void *run_farm(void *pt) {
-  param_t p = (param_t *)pt;
+  param_t * p = (param_t *)pt;
   int mystart = p->mystart;
   int myend = p->myend;
   pthread_mutex_t * foodlock = p->foodlock;
@@ -423,13 +415,42 @@ void *run_farm(void *pt) {
   {
     // run ant decisions
     run_tick(p);
-    MPI_Barrier( MPI_COMM_WORLD );
-
-    //every 5 ticks
-      // update_total_food()
-      // world rank sends g_total_food to ranks 
-      
-      // world rank decrements any pheremone levels by 1
+    if (threadnum!= g_num_threads)
+    {
+      pthread_mutex_lock(ticklock);
+      unsigned int myprogress = ++tickcounts[threadnum];
+      unsigned int mainprogress = tickcounts[g_num_threads];
+      pthread_mutex_unlock(ticklock); 
+      while (myprogress!=mainprogress)
+      {
+        pthread_mutex_lock(ticklock);
+        mainprogress = tickcounts[g_num_threads];
+        pthread_mutex_unlock(ticklock); 
+      }
+    }
+    else
+    {
+      int i;
+      pthread_mutex_lock(ticklock);
+      unsigned int finished = tickcounts[g_num_threads]+1;
+      pthread_mutex_unlock(ticklock); 
+      for (i = 0; i < g_num_threads-1;i++)
+      {
+        pthread_mutex_lock(ticklock);
+        unsigned int threadprogress = tickcounts[i];
+        pthread_mutex_unlock(ticklock); 
+        while(threadprogress != finished)
+        {
+          pthread_mutex_lock(ticklock);
+          threadprogress = tickcounts[i];
+          pthread_mutex_unlock(ticklock);
+        }
+      }
+      MPI_Barrier( MPI_COMM_WORLD );
+      pthread_mutex_lock(ticklock);
+      tickcounts[g_num_threads]++;
+      pthread_mutex_unlock(ticklock); 
+    }
   }
   free(p);
   return NULL;
@@ -447,7 +468,7 @@ void run_tick(param_t * p) {
   int threadnum = p->threadnum;
   unsigned int i,j,k;
   unsigned int x,y;
-  unsigned int ny, ny;
+  unsigned int nx, ny;
   j = 0;
   //loop through ants
   for(i = mystart; i < myend; i++)
@@ -484,7 +505,7 @@ void run_tick(param_t * p) {
       
       MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,winph);
       MPI_Win_fence(0,winph);
-      MPI_Get(&(pheremonLevel[1][arraystart]),arraylen,MPI_DOUBLE,rankmid,y*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
+      MPI_Get(&(pheremoneLevel[1][arraystart]),arraylen,MPI_DOUBLE,rankmid,y*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
       MPI_Win_unlock(rankmid,winph);
       MPI_Win_fence(0,winph);
 
@@ -492,7 +513,7 @@ void run_tick(param_t * p) {
       {      
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,ranktop,0,winph);
         MPI_Win_fence(0,winph);
-        MPI_Get(&(pheremonLevel[0][arraystart]),arraylen,MPI_DOUBLE,ranktop,(y-1)*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
+        MPI_Get(&(pheremoneLevel[0][arraystart]),arraylen,MPI_DOUBLE,ranktop,(y-1)*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
         MPI_Win_unlock(ranktop,winph);
         MPI_Win_fence(0,winph);
       }
@@ -501,7 +522,7 @@ void run_tick(param_t * p) {
       { 
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankbottom,0,winph);
         MPI_Win_fence(0,winph);
-        MPI_Get(&(pheremonLevel[2][arraystart]),arraylen,MPI_DOUBLE,rankbottom,(y+1)*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
+        MPI_Get(&(pheremoneLevel[2][arraystart]),arraylen,MPI_DOUBLE,rankbottom,(y+1)*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
         MPI_Win_unlock(rankbottom,winph);
         MPI_Win_fence(0,winph);
       }
@@ -542,7 +563,7 @@ void run_tick(param_t * p) {
       {
         nx=x;
         ny=y;
-        double maxph=pheremonLevel[1][1];
+        double maxph=pheremoneLevel[1][1];
         for (j=0;j<3;j++)
         {
           if ((j==0 && y > 0) || (j==2 && y < g_array_size-1))
@@ -567,7 +588,7 @@ void run_tick(param_t * p) {
             dx = ((unsigned int)(100*GenVal(mpi_myrank%Maxgen)))%3;
           while((dy==0 && !(y >0)) || (dy==2 && !(y<g_array_size-1)))
             dy = ((unsigned int)(100*GenVal(mpi_myrank%Maxgen)))%3;          
-          nx=x+dx
+          nx=x+dx;
           ny=y+dy;
         }
         myAnts[i].x=nx;
@@ -644,7 +665,7 @@ void spray(int x, int y, int occupancy)
     int rank = i/standard_array_size;
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winph);
     MPI_Win_fence(0,winph);
-    MPI_Get(&(pheremonLevel[arraystart]),arraylen,MPI_DOUBLE,rank,i*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
+    MPI_Get(&(pheremoneLevel[arraystart]),arraylen,MPI_DOUBLE,rank,i*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
     for (j=arraystart; j < arraylen+arraystart;j++)
     {
       double spraylevel= 100.0-10.0/occupancy*(j-(arraydimension-1)/2);
@@ -652,7 +673,7 @@ void spray(int x, int y, int occupancy)
         spraylevel*=-1;
       pheremoneLevel[j]+=spraylevel;
     }
-    MPI_Put(&(pheremonLevel[arraystart]),arraylen,MPI_DOUBLE,rank,i*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
+    MPI_Put(&(pheremoneLevel[arraystart]),arraylen,MPI_DOUBLE,rank,i*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
     MPI_Win_unlock(rank,winph);
     MPI_Win_fence(0,winph);
   }
@@ -697,7 +718,7 @@ void undo_spray(int x, int y, int occupancy)
     int rank = i/standard_array_size;
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winph);
     MPI_Win_fence(0,winph);
-    MPI_Get(&(pheremonLevel[arraystart]),arraylen,MPI_DOUBLE,rank,i*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
+    MPI_Get(&(pheremoneLevel[arraystart]),arraylen,MPI_DOUBLE,rank,i*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
     for (j=arraystart; j < arraylen+arraystart;j++)
     {
       double spraylevel= 100.0-10.0/occupancy*(j-(arraydimension-1)/2);
@@ -705,7 +726,7 @@ void undo_spray(int x, int y, int occupancy)
         spraylevel*=-1;
       pheremoneLevel[j]-=spraylevel;
     }
-    MPI_Put(&(pheremonLevel[arraystart]),arraylen,MPI_DOUBLE,rank,i*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
+    MPI_Put(&(pheremoneLevel[arraystart]),arraylen,MPI_DOUBLE,rank,i*g_array_size+xstart,arraylen,MPI_DOUBLE,winph);
     MPI_Win_unlock(rank,winph);
     MPI_Win_fence(0,winph);
   }
