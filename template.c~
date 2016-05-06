@@ -160,7 +160,7 @@ void update_total_food();
 double GenRowVal(unsigned int rowNumber);
 double GenAntVal(unsigned int antNumber);
 void spray(int x, int y, int high, int low, int type);
-void eat(int x, int y, double food_left);
+void eat(int x, int y);
 void check_highest_level(int x, int y, int * nx, int * ny);
 void queue_action(ActionType action, unsigned int x, unsigned int y);
 
@@ -235,6 +235,7 @@ int main(int argc, char *argv[])
 
   if (mpi_myrank == 0) {
     printf(" Simulation Complete!");
+    print_world();
   }
 
 
@@ -436,7 +437,7 @@ void run_farm() {
     // send ant decisions to world rank
     exchange_cells_post();
     MPI_Barrier( MPI_COMM_WORLD );;
-    if (mpi_myrank == 0)  print_world();
+    // if (mpi_myrank == 0)  print_world();
     //every 5 ticks
     if (ticks % 5 == 0)
     {
@@ -445,6 +446,7 @@ void run_farm() {
     MPI_Barrier( MPI_COMM_WORLD );
     // if (mpi_myrank == 0) { printf("RAN ITERATION\n");};
   }
+  printf("LEFTOVER FOOD = %d \n", g_total_food);
 }
 
 /***************************************************************************/
@@ -453,8 +455,8 @@ void run_farm() {
 // run ant decisions
 void run_tick() {
   unsigned int i;
-  unsigned int x,y;
-  unsigned int nx, ny;
+  int x,y;
+  int nx, ny;
   AntAction aa;
   // printf("%d running \n", i);
   //loop through ants
@@ -496,6 +498,10 @@ void run_tick() {
           //check highest level
           check_highest_level(x,y,&nx,&ny); //pass nx, ny by reference
           //if this is highest
+          if (nx > 1000 || ny > 1000)
+          {
+            printf("OUT %u, %u\n", ny,ny);
+          }
           if (x==nx && y==ny)
           {  
             queue_action(SPRAY_NEG, x, y);
@@ -521,6 +527,7 @@ void run_tick() {
         if (g_worldGrid[y][x].foodRemaining > 0)
         {
           myAnts[i].state = EATING;
+          myAnts[i].foodEaten++;
           //EAT FOOD
           printf("%d is EATING \n", i);
           queue_action(EAT, x, y);
@@ -529,12 +536,24 @@ void run_tick() {
         else
         {
           //MOVE random
-          myAnts[i].state = NOTHING;
-          nx = ((int)(x + GenAntVal(i)*3 -2))%g_array_size;
-          ny = ((int)(y + GenAntVal(i)*3 -2))%g_array_size;
-          myAnts[i].x = nx;
-          myAnts[i].y = ny;
-          queue_action(MOVE_TO, nx,ny);
+          // printf("VOOOOOOOOOOOOOOOOOOOOOOOOOOOOo\n");
+          // myAnts[i].state = NOTHING;
+          // if ((GenAntVal(i) > .5))
+          // { nx = 1; } 
+          // else { nx = -1;}
+          // if ((GenAntVal(i) > .5)) 
+          // { ny = 1; } 
+          // else { ny = -1;}
+          // printf("NX = %d \n",nx);
+          // printf("NY = %d \n",ny);
+          // myAnts[i].x = (myAnts[i].x+nx)%g_array_size;
+          // myAnts[i].y = (myAnts[i].y+ny)%g_array_size;
+          // printf("THIS HSIT %u \n %\n", (myAnts[i].y+ny)%g_array_size, (myAnts[i].x+nx)%g_array_size);
+          
+          myAnts[i].x = (myAnts[i].x+1)%g_array_size;
+          myAnts[i].y = (myAnts[i].y-1)%g_array_size;
+	  printf("OUT %u , %u \n", myAnts[i].x, myAnts[i].y);
+          queue_action(MOVE_TO, myAnts[i].x,myAnts[i].y);
           queue_action(MOVE_FROM, x,y);
         }
       }    
@@ -638,7 +657,7 @@ void exchange_cells_post() {
         {
           unsigned int x = receive_actionQueue[j].x;
           unsigned int y = receive_actionQueue[j].y;
-          double food_left = g_worldGrid[y][x].foodRemaining;
+      
 
           switch(receive_actionQueue[j].action) {
             case MOVE_TO:
@@ -657,7 +676,7 @@ void exchange_cells_post() {
               spray(x,y,1,0,-1);
               break;
             case EAT:
-              eat(x,y, food_left);
+              eat(x,y);
               break;
             default:
               break;
@@ -738,15 +757,18 @@ void spray(int x, int y, int high, int low, int type)
 /***************************************************************************/
 
 //consumes food in current cell
-void eat(int x, int y, double food_left)
+void eat(int x, int y)
 {
-  int split = g_worldGrid[y][x].occupancy;
-  if (food_left < split)
-    { g_worldGrid[y][x].foodRemaining -= (food_left/split);
-      g_total_food -= (food_left/split); }
-  else
-    { g_worldGrid[y][x].foodRemaining--;
-      g_total_food--;}
+  if (g_worldGrid[y][x].foodRemaining > 0)
+  {
+    int split = g_worldGrid[y][x].occupancy;
+    if (g_worldGrid[y][x].foodRemaining < split)
+      { g_total_food -= g_worldGrid[y][x].foodRemaining; 
+        g_worldGrid[y][x].foodRemaining = 0;}
+    else
+      { g_worldGrid[y][x].foodRemaining--;
+        g_total_food--;}
+  }
 }
 
 /***************************************************************************/
@@ -756,6 +778,7 @@ void eat(int x, int y, double food_left)
 void update_total_food()
 {
   int i;
+  int temp_total_food;
   if (mpi_myrank == 0)
   {
     MPI_Request sendRequest1;
@@ -763,15 +786,16 @@ void update_total_food()
     {
       MPI_Isend(&g_total_food, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &sendRequest1);
     }    
-    printf("%d food left\n", g_total_food);
-    for(i=0; i< 5; i++)
-    {
-      printf("Ant %d ate %f. \n", i, myAnts[i].foodEaten);
-    }
+    // printf("%d food left\n", g_total_food);
+    // for(i=0; i < 10; i++)
+    // {
+    //   printf("Ant %d ate %f. \n", i, myAnts[i].foodEaten);
+    // }
   }
 
   MPI_Status status;
-  MPI_Recv(&g_total_food, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &status);
+  MPI_Recv(&temp_total_food, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &status);
+  g_total_food = temp_total_food;
 }
 
 /***************************************************************************/
@@ -817,6 +841,7 @@ void print_world()
   {
     for(i = 0; i < g_array_size; i++)
     {
+      // printf("Num %d %d", i,);
       if(g_worldGrid[j][i].occupancy > 0)
       {
         printf("%2u", g_worldGrid[j][i].occupancy);
@@ -824,7 +849,7 @@ void print_world()
       else
       {
         if (g_worldGrid[j][i].foodRemaining > 0){
-          printf("++");  
+          printf("%.1f", g_worldGrid[j][i].foodRemaining);  
         }
         else
           printf("__");
@@ -842,6 +867,7 @@ void print_world()
 //queues an action 
 void queue_action(ActionType action, unsigned int x, unsigned int y)
 {
+  printf("INTSS    %d    %d\n", x,y);
   if(actionCount > actionCountMax)
   {
     printf("ERROR: Action queue is full.\n");
@@ -854,3 +880,4 @@ void queue_action(ActionType action, unsigned int x, unsigned int y)
     actionCount++;
   }
 }
+

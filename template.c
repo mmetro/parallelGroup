@@ -42,6 +42,7 @@ uint64_t rdtsc(){
   #include <hwi/include/bqc/A2_inlines.h>
 #endif
 
+// #define DEBUGGER
 
 /***************************************************************************/
 /* Defines *****************************************************************/
@@ -160,8 +161,8 @@ void update_total_food();
 double GenRowVal(unsigned int rowNumber);
 double GenAntVal(unsigned int antNumber);
 void spray(int x, int y, int high, int low, int type);
-void eat(int x, int y, double food_left);
-void check_highest_level(int x, int y, int * nx, int * ny);
+void eat(int x, int y);
+void check_highest_level(unsigned int x,unsigned  int y,unsigned  int * nx,unsigned  int * ny);
 void queue_action(ActionType action, unsigned int x, unsigned int y);
 
 // IO
@@ -215,7 +216,7 @@ int main(int argc, char *argv[])
 
 
   if (mpi_myrank == 0) {
-    start_time = get_Time();
+    start_time = get_Time;
   }
 
   //Run simulation 
@@ -225,7 +226,7 @@ int main(int argc, char *argv[])
   MPI_Barrier( MPI_COMM_WORLD );
 
   if (mpi_myrank == 0) {
-    mid_cycle_time = time(NULL);
+    mid_cycle_time = get_Time;
 
     compute_time = (mid_cycle_time - start_cycle_time) / clockrate;
     printf("Simulation duration:\t%f seconds\n", compute_time);
@@ -235,6 +236,7 @@ int main(int argc, char *argv[])
 
   if (mpi_myrank == 0) {
     printf(" Simulation Complete!");
+    print_world();
   }
 
 
@@ -356,9 +358,9 @@ void allocate_and_init_array()
   unsigned int row = 0;
   unsigned int col = 0;
   unsigned int i;
-  unsigned int foodheap = g_total_food/mpi_commsize;
+  unsigned int foodheap = g_total_food;
   unsigned int alloc_food = 0;
-
+  unsigned sum = 0;
   // At most we can have myNumAnts*2 actions per tick.
   // An ant moving will make two actions: a MOVE_TO and a MOVE_FROM
   actionCountMax = myNumAnts*2;
@@ -383,20 +385,29 @@ void allocate_and_init_array()
           {
             g_worldGrid[row][col].foodRemaining = alloc_food;
             foodheap -= alloc_food;
+            sum += alloc_food;
           }
           else
           {
             g_worldGrid[row][col].foodRemaining = foodheap;
+            sum += foodheap;
             foodheap = 0;
           }
         }
+      }
+
+      if (row == g_array_size-1 && col == g_array_size-1 && foodheap > 0)
+      {
+        g_worldGrid[row][col].foodRemaining = foodheap;
+        sum += foodheap; foodheap = 0;
       }
       
       g_worldGrid[row][col].pheremoneLevel = 0;
       g_worldGrid[row][col].occupancy = 0;
     }
-  }
 
+  }
+  // printf("SUM = %d \n", sum);
   // initialize the ants
   myAnts = calloc(myNumAnts, sizeof(Ant));
   for(i = 0; i < myNumAnts; i++)
@@ -436,7 +447,9 @@ void run_farm() {
     // send ant decisions to world rank
     exchange_cells_post();
     MPI_Barrier( MPI_COMM_WORLD );;
+    #ifdef DEBUGGER
     if (mpi_myrank == 0)  print_world();
+    #endif
     //every 5 ticks
     if (ticks % 5 == 0)
     {
@@ -445,6 +458,7 @@ void run_farm() {
     MPI_Barrier( MPI_COMM_WORLD );
     // if (mpi_myrank == 0) { printf("RAN ITERATION\n");};
   }
+  // printf("LEFTOVER FOOD = %d \n", g_total_food);
 }
 
 /***************************************************************************/
@@ -455,6 +469,7 @@ void run_tick() {
   unsigned int i;
   unsigned int x,y;
   unsigned int nx, ny;
+  unsigned int sx, sy;
   AntAction aa;
   // printf("%d running \n", i);
   //loop through ants
@@ -521,8 +536,9 @@ void run_tick() {
         if (g_worldGrid[y][x].foodRemaining > 0)
         {
           myAnts[i].state = EATING;
+          myAnts[i].foodEaten++;
           //EAT FOOD
-          printf("%d is EATING \n", i);
+          // printf("%d is EATING \n", i);
           queue_action(EAT, x, y);
           queue_action(SPRAY_PHEREMONE, x, y);
         }
@@ -530,11 +546,29 @@ void run_tick() {
         {
           //MOVE random
           myAnts[i].state = NOTHING;
-          nx = ((int)(x + GenAntVal(i)*3 -2))%g_array_size;
-          ny = ((int)(y + GenAntVal(i)*3 -2))%g_array_size;
-          myAnts[i].x = nx;
-          myAnts[i].y = ny;
-          queue_action(MOVE_TO, nx,ny);
+          if ((GenAntVal(i * mpi_myrank) > .5))
+            { sx = 1; } 
+          else { sx = 0;}
+          if ((GenAntVal(i * mpi_myrank) > .5)) 
+          { sy = 1; } 
+          else { sy = 0;}
+          // printf("NX = %d \n",nx);
+          // printf("NY = %d \n",ny);
+          // myAnts[i].x = (myAnts[i].x+nx)%g_array_size;
+          // myAnts[i].y = (myAnts[i].y+ny)%g_array_size;
+          // printf("THIS HSIT %u \n %\n", (myAnts[i].y+ny)%g_array_size, (myAnts[i].x+nx)%g_array_size);
+          
+          if ((GenAntVal(i * mpi_myrank) > .5))
+            { myAnts[i].x = (myAnts[i].x+sx)%g_array_size; }
+          else 
+            { myAnts[i].x = (myAnts[i].x-sx)%g_array_size;}
+          
+          if ((GenAntVal(i * mpi_myrank) > .5))
+            { myAnts[i].y = (myAnts[i].y+sy)%g_array_size; }
+          else 
+            { myAnts[i].y = (myAnts[i].y-sy)%g_array_size;}
+ 
+          queue_action(MOVE_TO, myAnts[i].x,myAnts[i].y);
           queue_action(MOVE_FROM, x,y);
         }
       }    
@@ -638,7 +672,7 @@ void exchange_cells_post() {
         {
           unsigned int x = receive_actionQueue[j].x;
           unsigned int y = receive_actionQueue[j].y;
-          double food_left = g_worldGrid[y][x].foodRemaining;
+      
 
           switch(receive_actionQueue[j].action) {
             case MOVE_TO:
@@ -648,16 +682,16 @@ void exchange_cells_post() {
               g_worldGrid[y][x].occupancy--;
               break;
             case SPRAY_PHEREMONE:
-              spray(x,y,15,5,1);
+              spray(x,y,5,2,1);     //edit the spray variables for test data
               break;
             case SPRAY_FOUND:
-              spray(x,y,5,5,1);
+              spray(x,y,1,1,1);
               break;
             case SPRAY_NEG:
-              spray(x,y,1,0,-1);
+              spray(x,y,1,1,-1);  //  1,0 vs  1,1 
               break;
             case EAT:
-              eat(x,y, food_left);
+              eat(x,y);
               break;
             default:
               break;
@@ -738,15 +772,20 @@ void spray(int x, int y, int high, int low, int type)
 /***************************************************************************/
 
 //consumes food in current cell
-void eat(int x, int y, double food_left)
+void eat(int x, int y)
 {
-  int split = g_worldGrid[y][x].occupancy;
-  if (food_left < split)
-    { g_worldGrid[y][x].foodRemaining -= (food_left/split);
-      g_total_food -= (food_left/split); }
-  else
-    { g_worldGrid[y][x].foodRemaining--;
-      g_total_food--;}
+  if (g_worldGrid[y][x].foodRemaining > 0)
+  {
+    int split = g_worldGrid[y][x].occupancy;
+    if (g_worldGrid[y][x].foodRemaining < split)
+      { g_total_food -= g_worldGrid[y][x].foodRemaining; 
+        // printf("REMAIN = %d\n", g_worldGrid[y][x].foodRemaining );
+        g_worldGrid[y][x].foodRemaining = 0;}
+    else
+      { g_worldGrid[y][x].foodRemaining--;
+        g_total_food--;}
+    // printf("TOTAL = %d\n ", g_total_food);
+  }
 }
 
 /***************************************************************************/
@@ -763,12 +802,14 @@ void update_total_food()
     for(i = 0; i < mpi_commsize; i++)
     {
       MPI_Isend(&g_total_food, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &sendRequest1);
-    }    
+    }
+    #ifdef DEBUGGER
     printf("%d food left\n", g_total_food);
-    for(i=0; i< 5; i++)
+    for(i=0; i < 10; i++)
     {
       printf("Ant %d ate %f. \n", i, myAnts[i].foodEaten);
     }
+    #endif
   }
 
   MPI_Status status;
@@ -780,29 +821,29 @@ void update_total_food()
 /* Function: check_highest_level********************************************/
 /***************************************************************************/
 //finds highest pheremone level around x,y, or just x,y if already highest
-void check_highest_level(int x, int y, int * nx, int * ny)
+void check_highest_level(unsigned int x,unsigned int y,unsigned int * nx,unsigned int * ny)
 {
   *nx = x;
   *ny = y;
   int max_level = g_worldGrid[y][x].pheremoneLevel;
 
   if (g_worldGrid[y][(x+1)%g_array_size].pheremoneLevel > max_level) 
-    { max_level = g_worldGrid[y][(x+1)%g_array_size].pheremoneLevel; *nx = y; *nx = x+1;}
+    { max_level = g_worldGrid[y][(x+1)%g_array_size].pheremoneLevel; *nx = y; *nx = (x+1)%g_array_size;}
   if (g_worldGrid[y][(x-1)%g_array_size].pheremoneLevel > max_level) 
-    { max_level = g_worldGrid[y][(x-1)%g_array_size].pheremoneLevel; *nx = y; *nx = x-1;}
+    { max_level = g_worldGrid[y][(x-1)%g_array_size].pheremoneLevel; *nx = y; *nx = (x-1)%g_array_size;}
   if (g_worldGrid[(y-1)%g_array_size][x].pheremoneLevel > max_level) 
-    { max_level = g_worldGrid[(y-1)%g_array_size][x].pheremoneLevel; *nx = y-1; *nx = x;}
+    { max_level = g_worldGrid[(y-1)%g_array_size][x].pheremoneLevel; *nx = (y-1)%g_array_size; *nx = x;}
   if (g_worldGrid[(y+1)%g_array_size][x].pheremoneLevel > max_level) 
-    { max_level = g_worldGrid[(y+1)%g_array_size][x].pheremoneLevel; *nx = y+1; *nx = x;}
+    { max_level = g_worldGrid[(y+1)%g_array_size][x].pheremoneLevel; *nx = (y+1)%g_array_size; *nx = x;}
 
   if (g_worldGrid[(y-1)%g_array_size][(x+1)%g_array_size].pheremoneLevel > max_level) 
-    { max_level = g_worldGrid[(y-1)%g_array_size][(x+1)%g_array_size].pheremoneLevel; *nx = y-1; *nx = x+1;} 
+    { max_level = g_worldGrid[(y-1)%g_array_size][(x+1)%g_array_size].pheremoneLevel; *nx = (y-1)%g_array_size; *nx = (x+1)%g_array_size;} 
   if (g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel > max_level) 
-    { max_level = g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel ; *nx = y-1; *nx = x-1;} 
+    { max_level = g_worldGrid[(y-1)%g_array_size][(x-1)%g_array_size].pheremoneLevel ; *nx = (y-1)%g_array_size; *nx = (x-1)%g_array_size;} 
   if (g_worldGrid[(y+1)%g_array_size][(x-1)%g_array_size].pheremoneLevel > max_level) 
-    { max_level = g_worldGrid[(y+1)%g_array_size][(x-1)%g_array_size].pheremoneLevel; *nx = y+1; *nx = x-1;} 
+    { max_level = g_worldGrid[(y+1)%g_array_size][(x-1)%g_array_size].pheremoneLevel; *nx = (y+1)%g_array_size; *nx = (x-1)%g_array_size;} 
   if (g_worldGrid[(y+1)%g_array_size][(x+1)%g_array_size].pheremoneLevel > max_level) 
-    { max_level = g_worldGrid[(y+1)%g_array_size][(x+1)%g_array_size].pheremoneLevel; *nx = y+1; *nx = x+1;} 
+    { max_level = g_worldGrid[(y+1)%g_array_size][(x+1)%g_array_size].pheremoneLevel; *nx = (y+1)%g_array_size; *nx = (x+1)%g_array_size;} 
 
 }
 
@@ -819,6 +860,7 @@ void print_world()
   {
     for(i = 0; i < g_array_size; i++)
     {
+      // printf("Num %d %d", i,);
       if(g_worldGrid[j][i].occupancy > 0)
       {
         printf("%2u", g_worldGrid[j][i].occupancy);
@@ -826,6 +868,7 @@ void print_world()
       else
       {
         if (g_worldGrid[j][i].foodRemaining > 0){
+          // printf("%.1f", g_worldGrid[j][i].foodRemaining);
           printf("++");  
         }
         else
@@ -844,6 +887,10 @@ void print_world()
 //queues an action 
 void queue_action(ActionType action, unsigned int x, unsigned int y)
 {
+  if (x > 1000 || y > 10000)
+  {
+    printf("ITS GOING CRAZZZZYYY.\n");
+  }
   if(actionCount > actionCountMax)
   {
     printf("ERROR: Action queue is full.\n");
