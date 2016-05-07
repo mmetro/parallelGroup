@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include "clcg4.h"
 #include <mpi.h>
+#include <unistd.h>
 
 
 /***************************************************************************/
@@ -243,6 +244,8 @@ int main(int argc, char *argv[])
     double compute_time_exchange_pre = exchange_cells_pre_total_cycle_time / clockrate;
     double compute_time_exchange_post = exchange_cells_post_total_cycle_time / clockrate;
     double compute_time_message = message_wait_total_cycle_time / clockrate;
+    print_world();
+    printf("Simulation Complete!\n");
     printf("Simulation duration:\t%f seconds\n", compute_time);
     printf("time spent in run_tick():\t%f seconds\n", compute_time_run_tick);
     printf("time spent in exchange_cells_pre():\t%f seconds\n", compute_time_exchange_pre);
@@ -255,8 +258,7 @@ int main(int argc, char *argv[])
 
 
   if (mpi_myrank == 0) {
-    printf(" Simulation Complete!");
-    print_world();
+    
   }
 
 
@@ -566,10 +568,10 @@ void run_tick() {
         {
           //MOVE random
           myAnts[i].state = NOTHING;
-          if ((GenAntVal(i * mpi_myrank) > .5))
+          if ((GenAntVal(i) > .5))
             { sx = 1; } 
           else { sx = 0;}
-          if ((GenAntVal(i * mpi_myrank) > .5)) 
+          if ((GenAntVal(i) > .5)) 
           { sy = 1; } 
           else { sy = 0;}
           // printf("NX = %d \n",nx);
@@ -578,12 +580,12 @@ void run_tick() {
           // myAnts[i].y = (myAnts[i].y+ny)%g_array_size;
           // printf("THIS HSIT %u \n %\n", (myAnts[i].y+ny)%g_array_size, (myAnts[i].x+nx)%g_array_size);
           
-          if ((GenAntVal(i * mpi_myrank) > .5))
+          if ((GenAntVal(i) > .5))
             { myAnts[i].x = (myAnts[i].x+sx)%g_array_size; }
           else 
             { myAnts[i].x = (myAnts[i].x-sx)%g_array_size;}
           
-          if ((GenAntVal(i * mpi_myrank) > .5))
+          if ((GenAntVal(i) > .5))
             { myAnts[i].y = (myAnts[i].y+sy)%g_array_size; }
           else 
             { myAnts[i].y = (myAnts[i].y-sy)%g_array_size;}
@@ -591,7 +593,8 @@ void run_tick() {
           queue_action(MOVE_TO, myAnts[i].x,myAnts[i].y);
           queue_action(MOVE_FROM, x,y);
         }
-      }    
+      }
+      //usleep(1);    
     }
     g_tick_counter++;
     run_tick_total_cycle_time += (get_Time() - run_tick_start_time); 
@@ -609,9 +612,9 @@ void exchange_cells_pre() {
   // The number of rows it needs from a rank
   unsigned int numRowsNeeded = 0;
   // Specifies which rows in the local copy it wants to update
-  unsigned int * rowsNeeded = calloc(g_array_size, sizeof(unsigned int *));
+  unsigned int * rowsNeeded = calloc(g_array_size, sizeof(unsigned int));
   // Array of y values, specifying the requested rows.  Will only be numRowsNeeded in length
-  unsigned int * rankMessageArray = calloc(g_array_size, sizeof(unsigned int ));
+  unsigned int *rankMessageArray = calloc(g_array_size, sizeof(unsigned int ));
 
   if(mpi_myrank != 0)
   {
@@ -764,7 +767,7 @@ void exchange_cells_post() {
 // each row has its own random stream
 double GenRowVal(unsigned int rowNumber)
 {
-  return GenVal(mpi_myrank + (g_array_size / mpi_commsize) + rowNumber);
+  return GenVal(mpi_myrank * (g_array_size / mpi_commsize) + rowNumber);
 }
 
 // generate a random value for the rank's nth ant
@@ -772,7 +775,7 @@ double GenRowVal(unsigned int rowNumber)
 double GenAntVal(unsigned int antNumber)
 {
   // The first g_array_size values are reserved for each row's stream
-  return GenVal(g_array_size + mpi_myrank + (g_num_ants / mpi_commsize) + antNumber);
+  return GenVal(g_array_size + mpi_myrank * (g_num_ants / mpi_commsize) + antNumber);
 }
 
 
