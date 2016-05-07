@@ -243,15 +243,13 @@ int main(int argc, char *argv[])
     double compute_time_exchange_pre = exchange_cells_pre_total_cycle_time / clockrate;
     double compute_time_exchange_post = exchange_cells_post_total_cycle_time / clockrate;
     double compute_time_message = message_wait_total_cycle_time / clockrate;
-    double compute_time_overhead = comm_overhead_total_cycle_time / clockrate;
     printf("Simulation duration:\t%f seconds\n", compute_time);
     printf("time spent in run_tick():\t%f seconds\n", compute_time_run_tick);
     printf("time spent in exchange_cells_pre():\t%f seconds\n", compute_time_exchange_pre);
     printf("time spent in exchange_cells_post():\t%f seconds\n", compute_time_exchange_post);
-    printf("time spent waiting for messages:\t%f seconds\n", compute_time_message);
     // This needs to be implemented still.  How do we want to determine it.
     // The total time in exchange_cells may be a good way
-    printf("Messaging overhead:\t%f seconds\n", compute_time_overhead);
+    printf("Messaging overhead:\t%f seconds\n", compute_time_message);
   }
 
 
@@ -649,6 +647,8 @@ void exchange_cells_pre() {
   else
   {
     MPI_Status status;
+
+    unsigned long long t = get_Time();
     // we aren't going to receive from ourselves here so -1
     unsigned int receivesRemaining = mpi_commsize - 1;
     while(receivesRemaining > 0)
@@ -659,6 +659,7 @@ void exchange_cells_pre() {
       if(flag)
       {
         // receive the number of rows that the rank wants
+        
         MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMROWS, MPI_COMM_WORLD, &status);
         // receive the array containing the coordiantes of the requested rows
         MPI_Recv(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, status.MPI_SOURCE, TAG_ROWS, MPI_COMM_WORLD, &status);
@@ -666,9 +667,11 @@ void exchange_cells_pre() {
         {
           MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD);
         }
+        
         receivesRemaining--;
       }
     }
+    message_wait_total_cycle_time += (get_Time() - t);
   }
   free(rowsNeeded);
   free(rankMessageArray);
@@ -681,7 +684,7 @@ void exchange_cells_pre() {
 // Send ant actions to world
 // Will use AntAction
 void exchange_cells_post() {
-    unsigned int i, j;
+    unsigned int j;
     MPI_Status status;
     MPI_Request sendRequest1;
     unsigned long long exchange_cells_post_start_time = get_Time();
@@ -692,6 +695,9 @@ void exchange_cells_post() {
     if(mpi_myrank == 0)
     {
       unsigned int receivesRemaining = mpi_commsize;
+      unsigned long long idle_since = get_Time();
+
+      // receive actions from every rank
       while(receivesRemaining > 0)
       {
         int flag;
@@ -699,12 +705,21 @@ void exchange_cells_post() {
         MPI_Iprobe(MPI_ANY_SOURCE, TAG_ACTIONS, MPI_COMM_WORLD, &flag, &status);
         if(flag)
         {
+          // figure out how long we had to wait before a message was available
+          message_wait_total_cycle_time += (get_Time() - idle_since);
+
           // receive the number of actions in the queue
           unsigned int receive_actionCount;
+          unsigned long long t = get_Time();
           MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMACTIONS, MPI_COMM_WORLD, &status);
+          message_wait_total_cycle_time += (get_Time() - t);
+
           //receive the action queue
           AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));
+          t = get_Time();
           MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, TAG_ACTIONS, MPI_COMM_WORLD, &status);
+          message_wait_total_cycle_time += (get_Time() - t);
+
           // apply the effect of each action to the world
           for(j = 0; j < receive_actionCount; j++)
           {
@@ -736,6 +751,7 @@ void exchange_cells_post() {
           }
           free(receive_actionQueue);
           receivesRemaining--;
+          idle_since = get_Time();
         }
       }
     }
@@ -849,7 +865,9 @@ void update_total_food()
   }
 
   MPI_Status status;
+  unsigned long long t = get_Time();
   MPI_Recv(&temp_total_food, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &status);
+  message_wait_total_cycle_time += (get_Time() - t);
   g_total_food = temp_total_food;
 }
 
