@@ -131,10 +131,17 @@ unsigned int actionCountMax;
   double clockrate = 1.6e9;
 #endif
 
-time_t start_cycle_time;
-time_t mid_cycle_time;
+unsigned long long start_cycle_time;
+unsigned long long mid_cycle_time;
 
 int g_tick_counter = 0;
+
+// Specific counters for timing
+unsigned long long run_tick_total_cycle_time = 0;
+unsigned long long exchange_cells_pre_total_cycle_time = 0;
+unsigned long long exchange_cells_post_total_cycle_time = 0;
+unsigned long long message_wait_total_cycle_time = 0;
+unsigned long long comm_overhead_total_cycle_time = 0;
 
 
 /***************************************************************************/
@@ -179,9 +186,6 @@ unsigned long long get_Time();
 
 int main(int argc, char *argv[])
 {
-  // Keep track of time
-  unsigned long long start_time=0;
-  unsigned long long end_time=0;
   double compute_time = 0;
 
 // Example MPI startup and using CLCG4 RNG
@@ -216,7 +220,7 @@ int main(int argc, char *argv[])
 
 
   if (mpi_myrank == 0) {
-    start_time = time(NULL);
+    start_cycle_time = get_Time();
   }
 
   //Run simulation 
@@ -226,10 +230,22 @@ int main(int argc, char *argv[])
   MPI_Barrier( MPI_COMM_WORLD );
 
   if (mpi_myrank == 0) {
-    mid_cycle_time = time(NULL);
+    mid_cycle_time = get_Time();
 
     compute_time = (mid_cycle_time - start_cycle_time) / clockrate;
+    double compute_time_run_tick = run_tick_total_cycle_time / clockrate;
+    double compute_time_exchange_pre = exchange_cells_pre_total_cycle_time / clockrate;
+    double compute_time_exchange_post = exchange_cells_post_total_cycle_time / clockrate;
+    double compute_time_message = message_wait_total_cycle_time / clockrate;
+    double compute_time_overhead = comm_overhead_total_cycle_time / clockrate;
     printf("Simulation duration:\t%f seconds\n", compute_time);
+    printf("time spent in run_tick():\t%f seconds\n", compute_time_run_tick);
+    printf("time spent in exchange_cells_pre():\t%f seconds\n", compute_time_exchange_pre);
+    printf("time spent in exchange_cells_post():\t%f seconds\n", compute_time_exchange_post);
+    printf("time spent waiting for messages:\t%f seconds\n", compute_time_message);
+    // This needs to be implemented still.  How do we want to determine it.
+    // The total time in exchange_cells may be a good way
+    printf("Messaging overhead:\t%f seconds\n", compute_time_overhead);
   }
 
 
@@ -470,7 +486,7 @@ void run_tick() {
   unsigned int x,y;
   unsigned int nx, ny;
   unsigned int sx, sy;
-  AntAction aa;
+  unsigned long long run_tick_start_time = get_Time();
   // printf("%d running \n", i);
   //loop through ants
   for(i = 0; i < myNumAnts; i++)
@@ -574,6 +590,7 @@ void run_tick() {
       }    
     }
     g_tick_counter++;
+    run_tick_total_cycle_time += (get_Time() - run_tick_start_time); 
 }
 
 
@@ -584,6 +601,7 @@ void run_tick() {
 // update only the rows nearby our ants
 void exchange_cells_pre() {
   unsigned int i,j;
+  unsigned long long exchange_cells_pre_start_time = get_Time();
   // The number of rows it needs from a rank
   unsigned int numRowsNeeded = 0;
   // Specifies which rows in the local copy it wants to update
@@ -608,17 +626,19 @@ void exchange_cells_pre() {
     }
 
     MPI_Status status;
-    MPI_Request sendRequest1, recvRequest1;
+    MPI_Request sendRequest1;
     // tell world rank how many rows we are requesting, and the row numbers
     MPI_Isend(&numRowsNeeded, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
     MPI_Isend(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
 
+    unsigned long long t = get_Time();
     // receive the rows
     MPI_Wait(&sendRequest1, &status);
     for(j = 0; j < numRowsNeeded; j++)
     {
       MPI_Recv(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
     }
+    message_wait_total_cycle_time += (get_Time() - t);
   }
   else
   {
@@ -627,6 +647,7 @@ void exchange_cells_pre() {
     for(i = 1; i < mpi_commsize; i++)
     {
       // determine what rows are requested
+      unsigned long long t = get_Time();
       MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
       MPI_Recv(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
       // send the requested rows
@@ -635,10 +656,12 @@ void exchange_cells_pre() {
         //printf("i = %u, numRowsNeeded = %u, j = %u, rankMessageArray[j] = %u\n", i, numRowsNeeded, j, rankMessageArray[j]);
         MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD);
       }
+      message_wait_total_cycle_time += (get_Time() - t);
     }
   }
   free(rowsNeeded);
   free(rankMessageArray);
+  exchange_cells_pre_total_cycle_time += (get_Time() - exchange_cells_pre_start_time); 
 }
 
 /***************************************************************************/
@@ -650,6 +673,7 @@ void exchange_cells_post() {
     unsigned int i, j;
     MPI_Status status;
     MPI_Request sendRequest1;
+    unsigned long long exchange_cells_post_start_time = get_Time();
     // tell world rank how many actions we are sending, and then send the actions
     MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
     MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &sendRequest1);
@@ -661,12 +685,13 @@ void exchange_cells_post() {
       {
         // receive the number of actions in the queue
         unsigned int receive_actionCount;
+        unsigned long long t = get_Time();
         MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
 
         //receive the action queue
         AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));
         MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD, &status);
-
+        message_wait_total_cycle_time += (get_Time() - t);
         // apply the effect of each action to the world
         for(j = 0; j < receive_actionCount; j++)
         {
@@ -704,7 +729,8 @@ void exchange_cells_post() {
     }
 
 
-   actionCount = 0;
+  actionCount = 0;
+  exchange_cells_post_total_cycle_time += (get_Time() - exchange_cells_post_start_time); 
    //printf("Exiting exchange_cells_post\n");
 }
 
