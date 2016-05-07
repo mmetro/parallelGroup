@@ -99,6 +99,12 @@ typedef struct AntAction {
 } AntAction;
 
 
+typedef enum e_MessagingTags
+{
+    TAG_NONE = 0, TAG_NUMROWS = 1, TAG_ROWS = 2, TAG_NUMACTIONS = 3, TAG_ACTIONS = 4
+
+} MessageTag;
+
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -628,8 +634,8 @@ void exchange_cells_pre() {
     MPI_Status status;
     MPI_Request sendRequest1;
     // tell world rank how many rows we are requesting, and the row numbers
-    MPI_Isend(&numRowsNeeded, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
-    MPI_Isend(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(&numRowsNeeded, 1, MPI_UNSIGNED, 0, TAG_NUMROWS, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, 0, TAG_ROWS, MPI_COMM_WORLD, &sendRequest1);
 
     unsigned long long t = get_Time();
     // receive the rows
@@ -642,21 +648,26 @@ void exchange_cells_pre() {
   }
   else
   {
-    // send the world rank's rows to the others
     MPI_Status status;
-    for(i = 1; i < mpi_commsize; i++)
+    // we aren't going to receive from ourselves here so -1
+    unsigned int receivesRemaining = mpi_commsize - 1;
+    while(receivesRemaining > 0)
     {
-      // determine what rows are requested
-      unsigned long long t = get_Time();
-      MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
-      MPI_Recv(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
-      // send the requested rows
-      for(j = 0; j < numRowsNeeded; j++)
+      int flag;
+      // find a rank we have gotten a message from already
+      MPI_Iprobe(MPI_ANY_SOURCE, TAG_ROWS, MPI_COMM_WORLD, &flag, &status);
+      if(flag)
       {
-        //printf("i = %u, numRowsNeeded = %u, j = %u, rankMessageArray[j] = %u\n", i, numRowsNeeded, j, rankMessageArray[j]);
-        MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD);
+        // receive the number of rows that the rank wants
+        MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMROWS, MPI_COMM_WORLD, &status);
+        // receive the array containing the coordiantes of the requested rows
+        MPI_Recv(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, status.MPI_SOURCE, TAG_ROWS, MPI_COMM_WORLD, &status);
+        for(j = 0; j < numRowsNeeded; j++)
+        {
+          MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD);
+        }
+        receivesRemaining--;
       }
-      message_wait_total_cycle_time += (get_Time() - t);
     }
   }
   free(rowsNeeded);
@@ -675,60 +686,59 @@ void exchange_cells_post() {
     MPI_Request sendRequest1;
     unsigned long long exchange_cells_post_start_time = get_Time();
     // tell world rank how many actions we are sending, and then send the actions
-    MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, &sendRequest1);
-    MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, TAG_NUMACTIONS, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, TAG_ACTIONS, MPI_COMM_WORLD, &sendRequest1);
     //printf("Sent %u actions to rank 0\n", actionCount);
     if(mpi_myrank == 0)
     {
-      // receive actions from all ranks
-      for(i = 0; i < mpi_commsize; i++)
+      unsigned int receivesRemaining = mpi_commsize;
+      while(receivesRemaining > 0)
       {
-        // receive the number of actions in the queue
-        unsigned int receive_actionCount;
-        unsigned long long t = get_Time();
-        MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD, &status);
-
-        //receive the action queue
-        AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));
-        MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, i, 0, MPI_COMM_WORLD, &status);
-        message_wait_total_cycle_time += (get_Time() - t);
-        // apply the effect of each action to the world
-        for(j = 0; j < receive_actionCount; j++)
+        int flag;
+        // find a rank we have gotten a message from already
+        MPI_Iprobe(MPI_ANY_SOURCE, TAG_ACTIONS, MPI_COMM_WORLD, &flag, &status);
+        if(flag)
         {
-          unsigned int x = receive_actionQueue[j].x;
-          unsigned int y = receive_actionQueue[j].y;
-      
-
-          switch(receive_actionQueue[j].action) {
-            case MOVE_TO:
-              g_worldGrid[y][x].occupancy++;
-              break;
-            case MOVE_FROM:
-              g_worldGrid[y][x].occupancy--;
-              break;
-            case SPRAY_PHEREMONE:
-              spray(x,y,5,2,1);     //edit the spray variables for test data
-              break;
-            case SPRAY_FOUND:
-              spray(x,y,1,1,1);
-              break;
-            case SPRAY_NEG:
-              spray(x,y,1,1,-1);  //  1,0 vs  1,1 
-              break;
-            case EAT:
-              eat(x,y);
-              break;
-            default:
-              break;
+          // receive the number of actions in the queue
+          unsigned int receive_actionCount;
+          MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMACTIONS, MPI_COMM_WORLD, &status);
+          //receive the action queue
+          AntAction *receive_actionQueue = calloc(receive_actionCount, sizeof(AntAction));
+          MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, TAG_ACTIONS, MPI_COMM_WORLD, &status);
+          // apply the effect of each action to the world
+          for(j = 0; j < receive_actionCount; j++)
+          {
+            unsigned int x = receive_actionQueue[j].x;
+            unsigned int y = receive_actionQueue[j].y;
+        
+            switch(receive_actionQueue[j].action) {
+              case MOVE_TO:
+                g_worldGrid[y][x].occupancy++;
+                break;
+              case MOVE_FROM:
+                g_worldGrid[y][x].occupancy--;
+                break;
+              case SPRAY_PHEREMONE:
+                spray(x,y,5,2,1);     //edit the spray variables for test data
+                break;
+              case SPRAY_FOUND:
+                spray(x,y,1,1,1);
+                break;
+              case SPRAY_NEG:
+                spray(x,y,1,1,-1);  //  1,0 vs  1,1 
+                break;
+              case EAT:
+                eat(x,y);
+                break;
+              default:
+                break;
+            }
           }
+          free(receive_actionQueue);
+          receivesRemaining--;
         }
-
-
-        free(receive_actionQueue);
       }
     }
-
-
   actionCount = 0;
   exchange_cells_post_total_cycle_time += (get_Time() - exchange_cells_post_start_time); 
    //printf("Exiting exchange_cells_post\n");
