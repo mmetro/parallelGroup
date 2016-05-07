@@ -489,30 +489,19 @@ void run_farm() {
 // run ant decisions
 void run_tick() {
   unsigned int i;
-  unsigned int ii, jj;
   unsigned int x,y;
   unsigned int nx, ny;
   unsigned int sx, sy;
-  unsigned int foods;
   unsigned long long run_tick_start_time = get_Time();
   // printf("%d running \n", i);
   //loop through ants
   for(i = 0; i < myNumAnts; i++)
     {
-      // ant thinking
       x = myAnts[i].x;
       y = myAnts[i].y;
       //printf("myrank = %d, i = %d, x = %d, y = %d\n", mpi_myrank, i, x,y);
-      // find remaining food
-      for(ii = 0; ii < g_array_size; ii++)
-      {
-        for(jj = 0; jj < g_array_size; jj++)
-        {
-          foods += g_worldGrid[jj][ii].foodRemaining;
-        }
-      }
     //if exists pheremone on current cell
-      if (foods > 0 && g_worldGrid[y][x].pheremoneLevel > 0)
+      if (g_worldGrid[y][x].pheremoneLevel > 0)
       {
         //if exists food 
         if (g_worldGrid[y][x].foodRemaining > 0)
