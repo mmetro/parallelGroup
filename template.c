@@ -20,7 +20,7 @@
 /***************************************************************************/
 
 // Define if running not on the BGQ
- #define __LOCAL__
+// #define __LOCAL__
 
 
 // This gets clock cycle count locally
@@ -159,7 +159,7 @@ int main(int argc, char *argv[])
 
   MPI_Barrier( MPI_COMM_WORLD );
 
-  printf("Rank %d: Initialization complete. Ant farm started...\n", mpi_myrank);
+  printf("Rank %d: Initialization complete. Ant farm starting...\n", mpi_myrank);
 
   //Run simulation 
   int i;
@@ -186,6 +186,7 @@ int main(int argc, char *argv[])
     p->ticklock = &winoclock;
     p->threadnum = i;
     pthread_create(&(pthreads[i]), NULL,run_farm,(void *)p); 
+    printf("Rank %d: thread %d  of %u will handle ants %d thru %d\n", mpi_myrank,i, g_num_threads,p->mystart,p->myend);
   }
   param_t * p = (param_t *)malloc(1*sizeof(param_t));
   p->mystart=ants_per_thread*g_num_threads;
@@ -196,6 +197,7 @@ int main(int argc, char *argv[])
   p->ticklock = &winphlock;
   p->ticklock = &winoclock;
   p->threadnum = g_num_threads;
+  printf("Rank %d: main thread will handle ants %d thru %d\n", mpi_myrank,p->mystart,p->myend);
   run_farm((void *)p);  
   
   // // Barrier after completion
@@ -525,6 +527,7 @@ void run_tick(param_t * p) {
   int pheremoneLevels[myend-mystart][3][3];
   unsigned int occupancies[myend-mystart];
   //loop through ants
+  printf("Rank %d: Thread %d starting recs.\n",mpi_myrank,threadnum);
   for(i = mystart; i < myend; i++)
     {
       x = myAnts[i].x;
@@ -592,6 +595,7 @@ void run_tick(param_t * p) {
       //if (foodamountsremaining[arrind] != 0)
       //  printf("Rank %d:Thread %d ant %d on (%u,%u) found %lf food among %d ants\n",mpi_myrank,threadnum, i, x, y, foodamountsremaining[arrind],occupancies[arrind]);
     }
+  printf("Rank %d: Thread %d finished recs.\n",mpi_myrank,threadnum);
     
   unsigned int finished;
   if (threadnum!= g_num_threads)
@@ -607,6 +611,7 @@ void run_tick(param_t * p) {
       mainprogress = tickcounts[g_num_threads];
       pthread_mutex_unlock(ticklock); 
     }
+    printf("Rank %d: Thread %d sees that main is ready in tick.\n",mpi_myrank, threadnum);
   }
   else
   {
@@ -619,13 +624,14 @@ void run_tick(param_t * p) {
       pthread_mutex_lock(ticklock);
       unsigned int threadprogress = tickcounts[t];
       pthread_mutex_unlock(ticklock); 
-      printf("Rank %d: main waiting on thread %d in tick.\n",mpi_myrank,i);
+      printf("Rank %d: main waiting on thread %d in tick.\n",mpi_myrank,t);
       while(threadprogress != finished)
       {
         pthread_mutex_lock(ticklock);
         threadprogress = tickcounts[t];
         pthread_mutex_unlock(ticklock);
       }
+      printf("Rank %d: main sees thread %d ready in tick.\n",mpi_myrank,t);
     }
     MPI_Barrier( MPI_COMM_WORLD );
     pthread_mutex_lock(ticklock);
