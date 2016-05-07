@@ -614,7 +614,7 @@ void exchange_cells_pre() {
   // Specifies which rows in the local copy it wants to update
   unsigned int * rowsNeeded = calloc(g_array_size, sizeof(unsigned int));
   // Array of y values, specifying the requested rows.  Will only be numRowsNeeded in length
-  unsigned int *rankMessageArray = calloc(g_array_size, sizeof(unsigned int ));
+  unsigned int *rowsNeededMessageArray = calloc(g_array_size, sizeof(unsigned int ));
 
   if(mpi_myrank != 0)
   {
@@ -625,7 +625,7 @@ void exchange_cells_pre() {
       {
         if(rowsNeeded[j % g_array_size] == FALSE)
         {
-          rankMessageArray[numRowsNeeded] = j % g_array_size;
+          rowsNeededMessageArray[numRowsNeeded] = j % g_array_size;
           numRowsNeeded++;
           rowsNeeded[j  % g_array_size] = TRUE;
         }
@@ -636,14 +636,14 @@ void exchange_cells_pre() {
     MPI_Request sendRequest1;
     // tell world rank how many rows we are requesting, and the row numbers
     MPI_Isend(&numRowsNeeded, 1, MPI_UNSIGNED, 0, TAG_NUMROWS, MPI_COMM_WORLD, &sendRequest1);
-    MPI_Isend(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, 0, TAG_ROWS, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(rowsNeededMessageArray, numRowsNeeded, MPI_UNSIGNED, 0, TAG_ROWS, MPI_COMM_WORLD, &sendRequest1);
 
     unsigned long long t = get_Time();
     // receive the rows
     MPI_Wait(&sendRequest1, &status);
     for(j = 0; j < numRowsNeeded; j++)
     {
-      MPI_Recv(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
+      MPI_Recv(g_worldGrid[rowsNeededMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
     }
     message_wait_total_cycle_time += (get_Time() - t);
   }
@@ -665,10 +665,10 @@ void exchange_cells_pre() {
         
         MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMROWS, MPI_COMM_WORLD, &status);
         // receive the array containing the coordiantes of the requested rows
-        MPI_Recv(rankMessageArray, numRowsNeeded, MPI_UNSIGNED, status.MPI_SOURCE, TAG_ROWS, MPI_COMM_WORLD, &status);
+        MPI_Recv(rowsNeededMessageArray, numRowsNeeded, MPI_UNSIGNED, status.MPI_SOURCE, TAG_ROWS, MPI_COMM_WORLD, &status);
         for(j = 0; j < numRowsNeeded; j++)
         {
-          MPI_Send(g_worldGrid[rankMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD);
+          MPI_Send(g_worldGrid[rowsNeededMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD);
         }
         
         receivesRemaining--;
@@ -677,7 +677,7 @@ void exchange_cells_pre() {
     message_wait_total_cycle_time += (get_Time() - t);
   }
   free(rowsNeeded);
-  free(rankMessageArray);
+  free(rowsNeededMessageArray);
   exchange_cells_pre_total_cycle_time += (get_Time() - exchange_cells_pre_start_time); 
 }
 
