@@ -20,7 +20,7 @@
 /***************************************************************************/
 
 // Define if running not on the BGQ
-// #define __LOCAL__
+ #define __LOCAL__
 
 
 // This gets clock cycle count locally
@@ -49,7 +49,7 @@ uint64_t rdtsc(){
 typedef struct Ant {
   double foodEaten;
   unsigned int x, y;
-  int state;
+  unsigned int alreadysprayed;
 } Ant;
 
 typedef struct param_t{
@@ -77,9 +77,9 @@ unsigned int * tickcounts;
 unsigned int g_array_size = 0;
 unsigned int my_array_size = 0;
 unsigned int standard_array_size = 0;
-int g_num_threads = 0;
-int g_num_ants = 0;
-unsigned int g_total_food = 0;
+unsigned int g_num_threads = 0;
+unsigned int g_num_ants = 0;
+double * g_total_food = NULL;
 
 double g_food_thresh_hold = 0.0;
 
@@ -211,7 +211,7 @@ int main(int argc, char *argv[])
 
     compute_time = (end_time - start_time) / clockrate;
     printf("Simulation duration:\t%f seconds\n", compute_time);
-    printf(" Simulation Complete!");
+    printf(" Simulation Complete!\n");
   }
 
 
@@ -231,7 +231,7 @@ void process_arguments(int argc, char* argv[]) {
   int threads = -1;
   int size = -1;
   int ants = -1;
-  int food = -1;
+  double food = -1;
   double food_respawn = 0;
   // Argument 1 is the number of threads to use per rank
   // Argument 2 is the size of matrix
@@ -247,24 +247,24 @@ void process_arguments(int argc, char* argv[]) {
   else
   {
     // Next, read in the number of threads
-    printf("Read in number of threads: %s\n", argv[1]);
     threads = atoi(argv[1]);
+    printf("Read in number of threads: %d\n", threads);
     
     // Read in the matrix size
-    printf("Read in matrix size: %s\n", argv[2]);
     size = atoi(argv[2]);
+    printf("Read in matrix size: %d\n", size);
 
     // Read in the number of ants
-    printf("Read in number of ants: %s\n", argv[3]);
     ants = atoi(argv[3]);
+    printf("Read in number of ants: %d\n", ants);
 
     // Read in the total amount of food
-    printf("Read in amount of food: %s\n", argv[4]);
-    food = atoi(argv[4]);
+    food = (double)atoi(argv[4]);
+    printf("Read in amount of food: %lf\n", food);
 
     // Read in the food respawn chance
-    //printf("Read in food respawn chance %s\n", argv[5]);
     //food_respawn = ((double)atoi(argv[5])) / 100.0;
+    printf("Read in food respawn chance %lf\n", food_respawn);
     
     if (size <= 0)
     {
@@ -298,30 +298,31 @@ void process_arguments(int argc, char* argv[]) {
     }
 
     // Time to set the globals.
-    g_array_size = size;
-    g_num_ants = ants;
+    g_array_size = (unsigned int)size;
+    g_num_ants = (unsigned int)ants+0;
+    printf("Rank %d: gnumants=%u(=ants=%d)\n",mpi_myrank,g_num_ants,ants);
     g_food_thresh_hold = food_respawn;
-    g_num_threads = threads;
-    MPI_Alloc_mem(sizeof(int)*1,MPI_INFO_NULL, &g_total_food);
-    MPI_Win_allocate_shared(1*sizeof(int),sizeof(int),MPI_INFO_NULL,MPI_COMM_WORLD, &g_total_food,&wintotalfood);
+    g_num_threads = (unsigned int)threads;
+    MPI_Alloc_mem(sizeof(double)*1,MPI_INFO_NULL, &g_total_food);
+    MPI_Win_allocate_shared(1*sizeof(double),sizeof(double),MPI_INFO_NULL,MPI_COMM_WORLD, &g_total_food,&wintotalfood);
     MPI_Win_fence(0,wintotalfood);
     
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,mpi_myrank,0,wintotalfood);
     MPI_Win_fence(0,wintotalfood);
-    MPI_Put(&food,1,MPI_INT,0,mpi_myrank,1,MPI_INT,wintotalfood);
+    MPI_Put(&food,1,MPI_DOUBLE,0,mpi_myrank,1,MPI_DOUBLE,wintotalfood);
     MPI_Win_unlock(mpi_myrank,wintotalfood);
     MPI_Win_fence(0,wintotalfood);
 
     // each rank owns some ants
     myNumAnts = g_num_ants / mpi_commsize;
-    int modrem = g_num_ants % mpi_commsize;
+    unsigned int modrem = g_num_ants % mpi_commsize;
     if (mpi_myrank <modrem)
       myNumAnts++;
     my_array_size = g_array_size/mpi_commsize;
     standard_array_size = my_array_size;
     if (mpi_myrank == mpi_commsize-1)
         my_array_size+=g_array_size%mpi_commsize;
-    printf("Rank %d: standardarrsize=%u\n",mpi_myrank,standard_array_size);
+    printf("Rank %d: standardarrsize=%u,myarrsize=%u,mynumants=%u,modrem=%u,gnumants=%u(=ants=%d),commsize=%d\n",mpi_myrank,standard_array_size,my_array_size,myNumAnts,modrem,g_num_ants,ants,mpi_commsize);
   }
 }
 
@@ -338,13 +339,13 @@ void allocate_and_init_array()
   unsigned int rowend = rowstart+my_array_size;
   unsigned int col = 0;
   unsigned int i;
-  unsigned int total_food;
+  double total_food;
   MPI_Win_lock(MPI_LOCK_EXCLUSIVE,mpi_myrank,0,wintotalfood);
   MPI_Win_fence(0,wintotalfood);
-  MPI_Get(&total_food,1,MPI_INT,0,mpi_myrank,1,MPI_INT,wintotalfood);
+  MPI_Get(&total_food,1,MPI_DOUBLE,0,mpi_myrank,1,MPI_DOUBLE,wintotalfood);
   MPI_Win_unlock(mpi_myrank,wintotalfood);
   MPI_Win_fence(0,wintotalfood);
-  unsigned int foodheap = total_food/mpi_commsize;
+  double foodheap = total_food/mpi_commsize;
 
   // each rank has a local copy of the world
   // ranks update their local copies, gasking only for the pieces of the world near their ants
@@ -359,11 +360,11 @@ void allocate_and_init_array()
   MPI_Alloc_mem(sizeof(int)*g_array_size,MPI_INFO_NULL, &(g_localOccupancyGrid[row]));
     for (col = 0; col < g_array_size; col++)
     {
-      //printf("Rank %d: initializing (%u,%u) out of (%u,%u)...\n",mpi_myrank,row,col, my_array_size,g_array_size);
+      printf("Rank %d: initializing (%u,%u) out of (%u,%u)...\n",mpi_myrank,row,col, my_array_size,g_array_size);
       g_localFoodGrid[row][col] = 0;
       g_localPheremoneGrid[row][col] = 0;
       g_localOccupancyGrid[row][col] = 0;
-      //printf("Rank %d: initialized (%u,%u) out of (%u,%u) to f=%lf,ph=%lf,o=%d...\n",mpi_myrank,row,col, my_array_size,g_array_size, g_localFoodGrid[row][col], g_localPheremoneGrid[row][col], g_localOccupancyGrid[row][col]);
+      printf("Rank %d: initialized (%u,%u) out of (%u,%u) to f=%lf,ph=%d,o=%d...\n",mpi_myrank,row,col, my_array_size,g_array_size, g_localFoodGrid[row][col], g_localPheremoneGrid[row][col], g_localOccupancyGrid[row][col]);
     }
   }
   MPI_Barrier( MPI_COMM_WORLD );
@@ -383,10 +384,10 @@ void allocate_and_init_array()
     printf("Rank %d: placing food at (%u,%u) out of (%u,%u)...\n",mpi_myrank,row,col, my_array_size,g_array_size);
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,mpi_myrank,0,winfood);
     MPI_Win_fence(0,winfood);
-    int currentfood;
-    MPI_Get(&currentfood,1,MPI_INT,mpi_myrank,row*g_array_size+col,1,MPI_INT,winfood);
+    double currentfood;
+    MPI_Get(&currentfood,1,MPI_DOUBLE,mpi_myrank,row*g_array_size+col,1,MPI_DOUBLE,winfood);
     currentfood++;
-    MPI_Put(&currentfood,1,MPI_INT,mpi_myrank,row*g_array_size+col,1,MPI_INT,winfood);
+    MPI_Put(&currentfood,1,MPI_DOUBLE,mpi_myrank,row*g_array_size+col,1,MPI_DOUBLE,winfood);
     MPI_Win_unlock(mpi_myrank,winfood);
     MPI_Win_fence(0,winfood);
     printf("Rank %d: placed food at (%u,%u) out of (%u,%u).\n",mpi_myrank,row,col, my_array_size,g_array_size);
@@ -396,19 +397,24 @@ void allocate_and_init_array()
 
   MPI_Barrier( MPI_COMM_WORLD );
   // initialize the ants
-  myAnts = malloc(myNumAnts*sizeof(Ant));
+  myAnts = (Ant *)malloc(myNumAnts*sizeof(Ant));
+  printf("Rank %d: initializing %u ants\n",mpi_myrank,myNumAnts);
   for(i = 0; i < myNumAnts; i++)
   {
     myAnts[i].foodEaten = 0;
-    myAnts[i].state = 0;
-    myAnts[i].x = (unsigned int) (GenVal(i%Maxgen) * g_array_size) % g_array_size;
-    myAnts[i].y = (unsigned int) (GenVal(i%Maxgen) * g_array_size) % g_array_size;
+    myAnts[i].x = (unsigned int) (g_array_size+GenVal(i%Maxgen) * g_array_size) % g_array_size;
+    myAnts[i].y = (unsigned int) (g_array_size+GenVal(i%Maxgen) * g_array_size) % g_array_size;
+    myAnts[i].alreadysprayed = 0;
     unsigned int x = myAnts[i].x;
     unsigned int y = myAnts[i].y;
     int rank = y/standard_array_size;
+    printf("Rank %d: placing ant %d, at (%u,%u) in rank %d\n",mpi_myrank,i,x,y,rank);
+    printf("Rank %d: placing ant %d, requesting lock\n",mpi_myrank,i);
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winoc);
+    printf("Rank %d: placing ant %d, requested lock\n",mpi_myrank,i);
     MPI_Win_fence(0,winoc);
     int currentoccupancy;
+    printf("Rank %d: placing ant %d, lock achieved\n",mpi_myrank,i);
     MPI_Get(&currentoccupancy,1,MPI_INT,rank,y*g_array_size+x,1,MPI_INT,winoc);
     currentoccupancy++;
     MPI_Put(&currentoccupancy,1,MPI_INT,rank,y*g_array_size+x,1,MPI_INT,winoc);
@@ -432,11 +438,11 @@ void *run_farm(void *pt) {
   pthread_mutex_t * foodlock = p->foodlock;
   pthread_mutex_t * ticklock = p->ticklock;
   int threadnum = p->threadnum;
-  unsigned int total_food;
+  double total_food;
   pthread_mutex_lock(foodlock);
   MPI_Win_lock(MPI_LOCK_EXCLUSIVE,0,0,wintotalfood);
   MPI_Win_fence(0,wintotalfood);
-  MPI_Get(&total_food,1,MPI_INT,0,0,1,MPI_INT,wintotalfood);
+  MPI_Get(&total_food,1,MPI_DOUBLE,0,0,1,MPI_DOUBLE,wintotalfood);
   MPI_Win_unlock(0,wintotalfood);
   MPI_Win_fence(0,wintotalfood);  
   pthread_mutex_unlock(foodlock);
@@ -486,12 +492,12 @@ void *run_farm(void *pt) {
     pthread_mutex_lock(foodlock);
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,0,0,wintotalfood);
     MPI_Win_fence(0,wintotalfood);
-    MPI_Get(&total_food,1,MPI_INT,0,0,1,MPI_INT,wintotalfood);
+    MPI_Get(&total_food,1,MPI_DOUBLE,0,0,1,MPI_DOUBLE,wintotalfood);
     MPI_Win_unlock(0,wintotalfood);
     MPI_Win_fence(0,wintotalfood);
     pthread_mutex_unlock(foodlock);
     if (threadnum==g_num_threads)
-      printf("Rank %d: tick %u complete. %u food remaining.\n",mpi_myrank,finished,total_food);
+      printf("Rank %d: tick %u complete. %lf food remaining.\n",mpi_myrank,finished/2,total_food);
   }
   free(p);
   return NULL;
@@ -512,22 +518,23 @@ void run_tick(param_t * p) {
   int threadnum = p->threadnum;
   unsigned int i,j,k;
   unsigned int x,y;
-  unsigned int nx, ny, total_food;
+  unsigned int nx, ny;
+  double total_food;
   j = 0;
-  int alreadysprayed=0;
+  double foodamountsremaining[myend-mystart];
+  int pheremoneLevels[myend-mystart][3][3];
+  unsigned int occupancies[myend-mystart];
   //loop through ants
   for(i = mystart; i < myend; i++)
     {
       x = myAnts[i].x;
       y = myAnts[i].y;
-      double foodremaining;
-      int pheremoneLevel[3][3];
-      int occupancy;
       int ranktop,rankmid,rankbottom;
       ranktop = (y-1)/standard_array_size;
       rankmid = (y)/standard_array_size;
       rankbottom = (y+1)/standard_array_size;
       unsigned int xstart=x;
+      int arrind = i-mystart;
       if (x>0)
         xstart--;
       unsigned int xend = x;
@@ -535,12 +542,12 @@ void run_tick(param_t * p) {
         xend++;
       unsigned int arraylen=xend-xstart+1;
       int arraystart=xstart-x+1;
-      printf("Rank %d: threadnum %d check ranks %d,%d,%d since y = %u and sas=%u\n",mpi_myrank,threadnum,ranktop,rankmid,rankbottom,y,standard_array_size);
+      //printf("Rank %d: threadnum %d check ranks %d,%d,%d since y = %u and sas=%u\n",mpi_myrank,threadnum,ranktop,rankmid,rankbottom,y,standard_array_size);
       
       pthread_mutex_lock(winoclock);
       MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,winoc);
       MPI_Win_fence(0,winoc);
-      MPI_Get(&occupancy,1,MPI_INT,rankmid,y*g_array_size+x,1,MPI_INT,winoc);
+      MPI_Get(&(occupancies[arrind]),1,MPI_INT,rankmid,y*g_array_size+x,1,MPI_INT,winoc);
       MPI_Win_unlock(rankmid,winoc);
       MPI_Win_fence(0,winoc);
       pthread_mutex_unlock(winoclock);
@@ -548,7 +555,7 @@ void run_tick(param_t * p) {
       pthread_mutex_lock(winfoodlock);
       MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,winfood);
       MPI_Win_fence(0,winfood);
-      MPI_Get(&foodremaining,1,MPI_DOUBLE,rankmid,y*g_array_size+x,1,MPI_DOUBLE,winfood);
+      MPI_Get(&(foodamountsremaining[arrind]),1,MPI_DOUBLE,rankmid,y*g_array_size+x,1,MPI_DOUBLE,winfood);
       MPI_Win_unlock(rankmid,winfood);
       MPI_Win_fence(0,winfood);
       pthread_mutex_unlock(winfoodlock);
@@ -556,37 +563,17 @@ void run_tick(param_t * p) {
       pthread_mutex_lock(winphlock);
       MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,winph);
       MPI_Win_fence(0,winph);
-      MPI_Get(&(pheremoneLevel[1][arraystart]),arraylen,MPI_INT,rankmid,y*g_array_size+xstart,arraylen,MPI_INT,winph);
+      MPI_Get(&(pheremoneLevels[arrind][1][arraystart]),arraylen,MPI_INT,rankmid,y*g_array_size+xstart,arraylen,MPI_INT,winph);
       MPI_Win_unlock(rankmid,winph);
       MPI_Win_fence(0,winph);
       pthread_mutex_unlock(winphlock);
-      
-      nx=x;
-      ny=y;
-      int maxph=pheremoneLevel[1][1];
-      for (j=0;j<3;j++)
-      {
-        if ((j==0 && y > 0) || (j==2 && y < g_array_size-1))
-        {
-          for (k=arraystart;k<arraystart+arraylen;k++)
-          {
-            int phlevel = pheremoneLevel[j][k];
-            if (phlevel>maxph)
-            {
-              maxph=phlevel;
-              nx=x+k-1;
-              ny=y+j-1;
-            }  
-          }
-        }
-      }
 
       if (y>0)
       {      
         pthread_mutex_lock(winphlock);
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,ranktop,0,winph);
         MPI_Win_fence(0,winph);
-        MPI_Get(&(pheremoneLevel[0][arraystart]),arraylen,MPI_INT,ranktop,(y-1)*g_array_size+xstart,arraylen,MPI_INT,winph);
+        MPI_Get(&(pheremoneLevels[arrind][0][arraystart]),arraylen,MPI_INT,ranktop,(y-1)*g_array_size+xstart,arraylen,MPI_INT,winph);
         MPI_Win_unlock(ranktop,winph);
         MPI_Win_fence(0,winph);
         pthread_mutex_unlock(winphlock);
@@ -597,68 +584,152 @@ void run_tick(param_t * p) {
         pthread_mutex_lock(winphlock);
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankbottom,0,winph);
         MPI_Win_fence(0,winph);
-        MPI_Get(&(pheremoneLevel[2][arraystart]),arraylen,MPI_INT,rankbottom,(y+1)*g_array_size+xstart,arraylen,MPI_INT,winph);
+        MPI_Get(&(pheremoneLevels[arrind][2][arraystart]),arraylen,MPI_INT,rankbottom,(y+1)*g_array_size+xstart,arraylen,MPI_INT,winph);
         MPI_Win_unlock(rankbottom,winph);
         MPI_Win_fence(0,winph);
         pthread_mutex_unlock(winphlock);
       }
-      
-      MPI_Barrier( MPI_COMM_WORLD );
-      if (foodremaining > 0 && foodremaining < occupancy)
+      //if (foodamountsremaining[arrind] != 0)
+      //  printf("Rank %d:Thread %d ant %d on (%u,%u) found %lf food among %d ants\n",mpi_myrank,threadnum, i, x, y, foodamountsremaining[arrind],occupancies[arrind]);
+    }
+    
+  unsigned int finished;
+  if (threadnum!= g_num_threads)
+  {
+    pthread_mutex_lock(ticklock);
+    unsigned int myprogress = ++tickcounts[threadnum];
+    unsigned int mainprogress = tickcounts[g_num_threads];
+    pthread_mutex_unlock(ticklock); 
+    printf("Rank %d: Thread %d waiting on main in tick.\n",mpi_myrank, threadnum);
+    while (myprogress!=mainprogress)
+    {
+      pthread_mutex_lock(ticklock);
+      mainprogress = tickcounts[g_num_threads];
+      pthread_mutex_unlock(ticklock); 
+    }
+  }
+  else
+  {
+    int t;
+    pthread_mutex_lock(ticklock);
+    finished = tickcounts[g_num_threads]+1;
+    pthread_mutex_unlock(ticklock); 
+    for (t = 0; t < g_num_threads;t++)
+    {
+      pthread_mutex_lock(ticklock);
+      unsigned int threadprogress = tickcounts[t];
+      pthread_mutex_unlock(ticklock); 
+      printf("Rank %d: main waiting on thread %d in tick.\n",mpi_myrank,i);
+      while(threadprogress != finished)
       {
-        double foodtoeat=foodremaining/occupancy;
+        pthread_mutex_lock(ticklock);
+        threadprogress = tickcounts[t];
+        pthread_mutex_unlock(ticklock);
+      }
+    }
+    MPI_Barrier( MPI_COMM_WORLD );
+    pthread_mutex_lock(ticklock);
+    tickcounts[g_num_threads]++;
+    pthread_mutex_unlock(ticklock);
+  }
+  for(i = mystart; i < myend; i++)
+    {
+      x = myAnts[i].x;
+      y = myAnts[i].y;
+      int rankmid;
+      rankmid = (y)/standard_array_size;
+      unsigned int xstart=x;
+      int arrind = i-mystart;
+      if (x>0)
+        xstart--;
+      unsigned int xend = x;
+      if (x<g_array_size-1)
+        xend++;
+      unsigned int arraylen=xend-xstart+1;
+      int arraystart=xstart-x+1;
+      
+      nx=x;
+      ny=y;
+      int maxph=pheremoneLevels[arrind][1][1];
+      for (j=0;j<3;j++)
+      {
+        if ((j==0 && y > 0) || (j==2 && y < g_array_size-1))
+        {
+          for (k=arraystart;k<arraystart+arraylen;k++)
+          {
+            int phlevel = pheremoneLevels[arrind][j][k];
+            if (phlevel>maxph)
+            {
+              maxph=phlevel;
+              nx=x+k-1;
+              ny=y+j-1;
+            }  
+          }
+        }
+      }
+    
+      if (foodamountsremaining[arrind] > 0 && foodamountsremaining[arrind] < occupancies[arrind])
+      {
+        double foodtoeat=foodamountsremaining[arrind]/occupancies[arrind];
         pthread_mutex_lock(foodlock);
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,0,0,wintotalfood);
         MPI_Win_fence(0,wintotalfood);
-        MPI_Get(&total_food,1,MPI_INT,0,0,1,MPI_INT,wintotalfood);
+        MPI_Get(&total_food,1,MPI_DOUBLE,0,0,1,MPI_DOUBLE,wintotalfood);
         total_food-=foodtoeat;
-        MPI_Put(&total_food,1,MPI_INT,0,0,1,MPI_INT,wintotalfood);
+        MPI_Put(&total_food,1,MPI_DOUBLE,0,0,1,MPI_DOUBLE,wintotalfood);
         MPI_Win_unlock(0,wintotalfood);
         MPI_Win_fence(0,wintotalfood);
         pthread_mutex_unlock(foodlock);
-        foodremaining=0;
+        printf("Rank %d:Thread %d ant %d on (%u,%u) shared %lf food among %d ants (ate %lf)\n",mpi_myrank,threadnum, i, x, y, foodamountsremaining[arrind],occupancies[arrind],foodtoeat);
+        foodamountsremaining[arrind]=0;
         myAnts[i].foodEaten+=foodtoeat;
         pthread_mutex_lock(winfoodlock);
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,winfood);
         MPI_Win_fence(0,winfood);
-        MPI_Put(&foodremaining,1,MPI_DOUBLE,rankmid,y*g_array_size+x,1,MPI_DOUBLE,winfood);
+        MPI_Put(&(foodamountsremaining[arrind]),1,MPI_DOUBLE,rankmid,y*g_array_size+x,1,MPI_DOUBLE,winfood);
         MPI_Win_unlock(rankmid,winfood);
         MPI_Win_fence(0,winfood);
         pthread_mutex_unlock(winfoodlock);
-        if (alreadysprayed==0)
+        if (myAnts[i].alreadysprayed==0)
         {
           spray(x,y,winphlock);
-          alreadysprayed=1;
+          myAnts[i].alreadysprayed=1;
         }
       }  
-      else if (foodremaining > 0)
+      else if (foodamountsremaining[arrind] > 0)
       {
         myAnts[i].foodEaten++;
+        printf("Rank %d:Thread %d ant %d on (%u,%u) (out of %d on the space) ate 1 food\n",mpi_myrank,threadnum, i, x, y, occupancies[arrind]);
         pthread_mutex_lock(foodlock);
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,0,0,wintotalfood);
         MPI_Win_fence(0,wintotalfood);
-        MPI_Get(&total_food,1,MPI_INT,0,0,1,MPI_INT,wintotalfood);
+        MPI_Get(&total_food,1,MPI_DOUBLE,0,0,1,MPI_DOUBLE,wintotalfood);
         total_food-=1;
-        MPI_Put(&total_food,1,MPI_INT,0,0,1,MPI_INT,wintotalfood);
+        MPI_Put(&total_food,1,MPI_DOUBLE,0,0,1,MPI_DOUBLE,wintotalfood);
         MPI_Win_unlock(0,wintotalfood);
         MPI_Win_fence(0,wintotalfood);
         pthread_mutex_unlock(foodlock);
         pthread_mutex_lock(winfoodlock);
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rankmid,0,winfood);
         MPI_Win_fence(0,winfood);
-        MPI_Get(&foodremaining,1,MPI_DOUBLE,rankmid,y*g_array_size+x,1,MPI_DOUBLE,winfood);
-        foodremaining--;
-        MPI_Put(&foodremaining,1,MPI_DOUBLE,rankmid,y*g_array_size+x,1,MPI_DOUBLE,winfood);
+        MPI_Get(&(foodamountsremaining[arrind]),1,MPI_DOUBLE,rankmid,y*g_array_size+x,1,MPI_DOUBLE,winfood);
+        foodamountsremaining[arrind]--;
+        MPI_Put(&(foodamountsremaining[arrind]),1,MPI_DOUBLE,rankmid,y*g_array_size+x,1,MPI_DOUBLE,winfood);
         MPI_Win_unlock(rankmid,winfood);
         MPI_Win_fence(0,winfood);
         pthread_mutex_unlock(winfoodlock);
-        undo_spray(x,y,winphlock);
-        alreadysprayed=0;
+        if (myAnts[i].alreadysprayed==0)
+        {
+          spray(x,y,winphlock);
+          myAnts[i].alreadysprayed=1;
+        }
       }
       else
       {
+        int rand=0;
         while (x==nx && y==ny)
         {
+          rand=1;
           unsigned int dx = ((unsigned int)(100*GenVal(mpi_myrank%Maxgen)))%3;
           unsigned int dy = ((unsigned int)(100*GenVal(mpi_myrank%Maxgen)))%3;
           while((dx==0 && !(x >0)) || (dx==2 && !(x<g_array_size-1)))
@@ -668,7 +739,12 @@ void run_tick(param_t * p) {
           nx=x+dx-1;
           ny=y+dy-1;
         }
-        printf("Rank %d:Thread %d moving ant %d from (%u,%u) to (%u,%u)\n",mpi_myrank,threadnum, i, x, y, nx, ny);
+        if (myAnts[i].alreadysprayed == 1)
+        {
+          undo_spray(x,y,winphlock);
+          myAnts[i].alreadysprayed=0;
+        }
+        printf("Rank %d:Thread %d moving ant %d from (%u,%u) to (%u,%u),rand=%d,ph=%d\n",mpi_myrank,threadnum, i, x, y, nx, ny,rand,pheremoneLevels[arrind][ny-y+1][nx-x+1]);
         myAnts[i].x=nx;
         myAnts[i].y=ny;
         int rank = y/standard_array_size;
@@ -686,9 +762,9 @@ void run_tick(param_t * p) {
         pthread_mutex_lock(winoclock);
         MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winoc);
         MPI_Win_fence(0,winoc);
-        MPI_Get(&currentoccupancy,1,MPI_INT,rank,y*g_array_size+x,1,MPI_INT,winoc);
+        MPI_Get(&currentoccupancy,1,MPI_INT,rank,ny*g_array_size+nx,1,MPI_INT,winoc);
         currentoccupancy++;
-        MPI_Put(&currentoccupancy,1,MPI_INT,rank,y*g_array_size+x,1,MPI_INT,winoc);
+        MPI_Put(&currentoccupancy,1,MPI_INT,rank,ny*g_array_size+nx,1,MPI_INT,winoc);
         MPI_Win_unlock(rank,winoc);
         MPI_Win_fence(0,winoc);
         pthread_mutex_unlock(winoclock);
@@ -745,7 +821,7 @@ void spray(int x, int y, pthread_mutex_t * winphlock)
   for (i=ystart;i<yend;i++)
   {
     int rank = i/standard_array_size;
-    printf("Rank %d: spraying (%u to %u,%u) in rank %d\n",mpi_myrank,xstart,xend,i,rank);
+    //printf("Rank %d: spraying (%u to %u,%u) in rank %d\n",mpi_myrank,xstart,xend,i,rank);
     pthread_mutex_lock(winphlock);
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winph);
     MPI_Win_fence(0,winph);
