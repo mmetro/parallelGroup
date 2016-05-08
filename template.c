@@ -385,7 +385,7 @@ void allocate_and_init_array()
   unsigned sum = 0;
   // At most we can have myNumAnts*2 actions per tick.
   // An ant moving will make two actions: a MOVE_TO and a MOVE_FROM
-  actionCountMax = myNumAnts*2;
+  actionCountMax = (g_num_ants / mpi_commsize+(g_num_ants % mpi_commsize))*2;
   actionQueue = calloc(actionCountMax, sizeof(AntAction));
   actionCount = 0;
 
