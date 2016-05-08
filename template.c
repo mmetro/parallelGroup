@@ -147,6 +147,7 @@ int g_tick_counter = 0;
 unsigned long long run_tick_total_cycle_time = 0;
 unsigned long long exchange_cells_pre_total_cycle_time = 0;
 unsigned long long exchange_cells_post_total_cycle_time = 0;
+unsigned long long exchange_cells_post_compute_cycle_time = 0;
 unsigned long long message_wait_total_cycle_time = 0;
 unsigned long long comm_overhead_total_cycle_time = 0;
 
@@ -243,11 +244,13 @@ int main(int argc, char *argv[])
     double compute_time_run_tick = run_tick_total_cycle_time / clockrate;
     double compute_time_exchange_pre = exchange_cells_pre_total_cycle_time / clockrate;
     double compute_time_exchange_post = exchange_cells_post_total_cycle_time / clockrate;
+    double compute_time_exchange_post_action_queue = exchange_cells_post_compute_cycle_time / clockrate;
     double compute_time_message = message_wait_total_cycle_time / clockrate;
+    double compute_time_total = (run_tick_total_cycle_time + exchange_cells_post_compute_cycle_time) / clockrate;
     print_world();
     printf("Simulation Complete!\n");
     printf("Simulation duration:\t%f seconds\n", compute_time);
-    printf("time spent in run_tick():\t%f seconds\n", compute_time_run_tick);
+    printf("time spent in computations:\t%f seconds\n", compute_time_total);
     printf("time spent in exchange_cells_pre():\t%f seconds\n", compute_time_exchange_pre);
     printf("time spent in exchange_cells_post():\t%f seconds\n", compute_time_exchange_post);
     // This needs to be implemented still.  How do we want to determine it.
@@ -727,6 +730,7 @@ void exchange_cells_post() {
           MPI_Recv(receive_actionQueue, receive_actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, TAG_ACTIONS, MPI_COMM_WORLD, &status);
           message_wait_total_cycle_time += (get_Time() - t);
 
+          unsigned long long post_compute_start_time = get_Time();
           // apply the effect of each action to the world
           for(j = 0; j < receive_actionCount; j++)
           {
@@ -765,6 +769,7 @@ void exchange_cells_post() {
           free(receive_actionQueue);
           receivesRemaining--;
           idle_since = get_Time();
+          exchange_cells_post_compute_cycle_time += (get_Time() - post_compute_start_time); 
         }
       }
     }
