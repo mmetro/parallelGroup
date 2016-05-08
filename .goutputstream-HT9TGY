@@ -600,7 +600,8 @@ void run_tick(param_t * p) {
     }
   printf("Rank %d: Thread %d finished receives.\n",mpi_myrank,threadnum);
     
-  //same wait mechanism as in run_farm() 
+  //same wait mechanism as in run_farm()  
+  unsigned int finished=0;
   if (threadnum!= g_num_threads)
   {
     pthread_mutex_lock(ticklock);
@@ -620,7 +621,7 @@ void run_tick(param_t * p) {
   {
     int t;
     pthread_mutex_lock(ticklock);
-    unsigned int finished = tickcounts[g_num_threads]+1;
+    finished = tickcounts[g_num_threads]+1;
     pthread_mutex_unlock(ticklock); 
     for (t = 0; t < g_num_threads;t++)
     {
@@ -679,7 +680,7 @@ void run_tick(param_t * p) {
         }
       }
       //choose a random next location if all surrounding pheremone levels are 0
-      if (pheremoneLevels[arrind][ny-y+1][nx-x+1]== 0)
+      if (pheremoneLevels[arrind][ny-y+1][nx-x+1])
       {
         unsigned int dx = 2*(((unsigned int)(100*GenVal(mpi_myrank%Maxgen)))%2);
         unsigned int dy = 2*(((unsigned int)(100*GenVal(mpi_myrank%Maxgen)))%2);
@@ -812,11 +813,11 @@ unsigned long long get_Time()
 
 //sprays pheremones on adjacent Cells
 //sprays values according to the following grid (making sure not to go off the grid)
-//0  0  0  0  0  0  0  0  0  10  0  0  0  0  0  0  0  0  0
-//0  0  0  0  0  0  0  0  10 20  10 0  0  0  0  0  0  0  0 
-//0  0  0  0  0  0  0  10 20 30  20 10 0  0  0  0  0  0  0 
-//0  0  0  0  0  0  10 20 30 40  30 20 10 0  0  0  0  0  0 
-//0  0  0  0  0  10 20 30 40 50  40 30 20 10 0  0  0  0  0 
+//0
+//0
+//0
+//0
+//0...
 //0  0  0  0  10 20 30 40 50 60  50 40 30 20 10 0  0  0  0
 //0  0  0  10 20 30 40 50 60 70  60 50 40 30 20 10 0  0  0
 //0  0  10 20 30 40 50 60 70 80  70 60 50 40 30 20 10 0  0
@@ -826,11 +827,11 @@ unsigned long long get_Time()
 //0  0  10 20 30 40 50 60 70 80  70 60 50 40 30 20 10 0  0
 //0  0  0  10 20 30 40 50 60 70  60 50 40 30 20 10 0  0  0
 //0  0  0  0  10 20 30 40 50 60  50 40 30 20 10 0  0  0  0
-//0  0  0  0  0  10 20 30 40 50  40 30 20 10 0  0  0  0  0 
-//0  0  0  0  0  0  10 20 30 40  30 20 10 0  0  0  0  0  0
-//0  0  0  0  0  0  0  10 20 30  20 10 0  0  0  0  0  0  0 
-//0  0  0  0  0  0  0  0  10 20  10 0  0  0  0  0  0  0  0
-//0  0  0  0  0  0  0  0  0  10  0  0  0  0  0  0  0  0  0
+//0...
+//0
+//0
+//0
+//0
 void spray(int x, int y, pthread_mutex_t * winphlock)
 {
   int arraydimension=19;
@@ -862,7 +863,7 @@ void spray(int x, int y, pthread_mutex_t * winphlock)
   for (i=ystart;i<yend;i++)
   {
     int rank = i/standard_array_size;
-    printf("Rank %d: spraying (%u to %u,%u) in rank %d\n",mpi_myrank,xstart,xend,i,rank);
+    //printf("Rank %d: spraying (%u to %u,%u) in rank %d\n",mpi_myrank,xstart,xend,i,rank);
     pthread_mutex_lock(winphlock);
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE,rank,0,winph);
     MPI_Win_fence(0,winph);
