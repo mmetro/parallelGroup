@@ -96,7 +96,7 @@ typedef struct AntAction {
   //action(type), x(ax), y(ay){}; //init
 
   ActionType action;
-  unsigned int x, y;
+  unsigned int x, y, nx, ny,isValid;//
 } AntAction;
 
 
@@ -177,7 +177,7 @@ double GenAntVal(unsigned int antNumber);
 void spray(int x, int y, int high, int low, int type);
 void eat(int x, int y);
 void check_highest_level(unsigned int x,unsigned  int y,unsigned  int * nx,unsigned  int * ny);
-void queue_action(ActionType action, unsigned int x, unsigned int y);
+void queue_action(ActionType action, unsigned int x, unsigned int y, unsigned int nx, unsigned int ny);
 
 // IO
 void print_world();
@@ -438,7 +438,7 @@ void allocate_and_init_array()
     myAnts[i].state = 0;
     myAnts[i].x = (unsigned int) (GenAntVal(i) * g_array_size);
     myAnts[i].y = (unsigned int) (GenAntVal(i) * g_array_size);
-    queue_action(MOVE_TO, myAnts[i].x, myAnts[i].y);
+    queue_action(MOVE_FROM, 0,0,myAnts[i].x, myAnts[i].y);
   }
   printf("Rank %d init  %d ants.\n", mpi_myrank, myNumAnts);
   exchange_cells_post();
@@ -509,7 +509,7 @@ void run_tick() {
           myAnts[i].state = EATING;
           //EAT FOOD
           // printf("%d is EATING \n", i);
-          queue_action(EAT, x, y);
+          queue_action(EAT, x, y,0,0);
         
           //if enough food
           if (g_worldGrid[y][x].foodRemaining > g_worldGrid[y][x].occupancy)
@@ -523,7 +523,7 @@ void run_tick() {
             //ant.food + split
             myAnts[i].foodEaten+= split;
             //SPRAY -1
-            queue_action(SPRAY_NEG, x, y);
+            queue_action(SPRAY_NEG, x, y,0,0);
             myAnts[i].state = SEARCHING;
           }
         }
@@ -535,20 +535,20 @@ void run_tick() {
           //if this is highest
           if (x==nx && y==ny)
           {  
-            queue_action(SPRAY_NEG, x, y);
+            queue_action(SPRAY_NEG, x, y,0,0);
             myAnts[i].state = SEARCHING;
           }
           else if (myAnts[i].state == NOTHING)
           {
             myAnts[i].state = SEARCHING;
-            queue_action(SPRAY_FOUND, x, y);
+            queue_action(SPRAY_FOUND, x, y,0,0);
           }
           else if (myAnts[i].state == SEARCHING)
           {
             myAnts[i].x = nx;
             myAnts[i].y = ny;
-            queue_action(MOVE_TO, nx, ny);
-            queue_action(MOVE_FROM, x, y);
+            //queue_action(MOVE_TO, nx, ny);
+            queue_action(MOVE_FROM, x, y,nx,ny);
           }
         }
       }
@@ -561,8 +561,8 @@ void run_tick() {
           myAnts[i].foodEaten++;
           //EAT FOOD
           // printf("%d is EATING \n", i);
-          queue_action(EAT, x, y);
-          queue_action(SPRAY_PHEREMONE, x, y);
+          queue_action(EAT, x, y,0,0);
+          queue_action(SPRAY_PHEREMONE, x, y,0,0);
         }
         else
         {
@@ -590,8 +590,8 @@ void run_tick() {
           else 
             { myAnts[i].y = (myAnts[i].y-sy)%g_array_size;}
  
-          queue_action(MOVE_TO, myAnts[i].x,myAnts[i].y);
-          queue_action(MOVE_FROM, x,y);
+          //queue_action(MOVE_TO, myAnts[i].x,myAnts[i].y);
+          queue_action(MOVE_FROM, x,y,myAnts[i].x,myAnts[i].y);
         }
       }
       //usleep(1);    
@@ -625,7 +625,7 @@ void exchange_cells_pre() {
       {
         if(rowsNeeded[j % g_array_size] == FALSE)
         {
-          rowsNeededMessageArray[numRowsNeeded] = j % g_array_size;
+          rowsNeededMessageArray[numRowsNeeded] = j % g_array_size + 1;
           numRowsNeeded++;
           rowsNeeded[j  % g_array_size] = TRUE;
         }
@@ -635,15 +635,15 @@ void exchange_cells_pre() {
     MPI_Status status;
     MPI_Request sendRequest1;
     // tell world rank how many rows we are requesting, and the row numbers
-    MPI_Isend(&numRowsNeeded, 1, MPI_UNSIGNED, 0, TAG_NUMROWS, MPI_COMM_WORLD, &sendRequest1);
-    MPI_Isend(rowsNeededMessageArray, numRowsNeeded, MPI_UNSIGNED, 0, TAG_ROWS, MPI_COMM_WORLD, &sendRequest1);
+    //MPI_Isend(&numRowsNeeded, 1, MPI_UNSIGNED, 0, TAG_NUMROWS, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(rowsNeededMessageArray, g_array_size/*numRowsNeeded*/, MPI_UNSIGNED, 0, TAG_ROWS, MPI_COMM_WORLD, &sendRequest1);
 
     unsigned long long t = get_Time();
     // receive the rows
-    MPI_Wait(&sendRequest1, &status);
+   // MPI_Wait(&sendRequest1, &status);
     for(j = 0; j < numRowsNeeded; j++)
     {
-      MPI_Recv(g_worldGrid[rowsNeededMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
+      MPI_Recv(g_worldGrid[rowsNeededMessageArray[j]-1], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
     }
     message_wait_total_cycle_time += (get_Time() - t);
   }
@@ -663,12 +663,16 @@ void exchange_cells_pre() {
       {
         // receive the number of rows that the rank wants
         
-        MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMROWS, MPI_COMM_WORLD, &status);
+        //MPI_Recv(&numRowsNeeded, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMROWS, MPI_COMM_WORLD, &status);
         // receive the array containing the coordiantes of the requested rows
-        MPI_Recv(rowsNeededMessageArray, numRowsNeeded, MPI_UNSIGNED, status.MPI_SOURCE, TAG_ROWS, MPI_COMM_WORLD, &status);
+        MPI_Recv(rowsNeededMessageArray, g_array_size/*numRowsNeeded*/, MPI_UNSIGNED, status.MPI_SOURCE, TAG_ROWS, MPI_COMM_WORLD, &status);
+        numRowsNeeded=g_array_size;
         for(j = 0; j < numRowsNeeded; j++)
         {
-          MPI_Send(g_worldGrid[rowsNeededMessageArray[j]], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD);
+          if (rowsNeededMessageArray[j]!=0)
+            MPI_Send(g_worldGrid[rowsNeededMessageArray[j]-1], g_array_size * (sizeof(Cell)/sizeof(char)), MPI_CHAR, status.MPI_SOURCE, 0, MPI_COMM_WORLD);
+          else
+            j=numRowsNeeded;
         }
         
         receivesRemaining--;
@@ -692,8 +696,8 @@ void exchange_cells_post() {
     MPI_Request sendRequest1;
     unsigned long long exchange_cells_post_start_time = get_Time();
     // tell world rank how many actions we are sending, and then send the actions
-    MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, TAG_NUMACTIONS, MPI_COMM_WORLD, &sendRequest1);
-    MPI_Isend(actionQueue, actionCount * (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, TAG_ACTIONS, MPI_COMM_WORLD, &sendRequest1);
+   //MPI_Isend(&actionCount, 1, MPI_UNSIGNED, 0, TAG_NUMACTIONS, MPI_COMM_WORLD, &sendRequest1);
+    MPI_Isend(actionQueue, /*actionCount*/ actionCountMax* (sizeof(AntAction)/sizeof(char)), MPI_CHAR, 0, TAG_ACTIONS, MPI_COMM_WORLD, &sendRequest1);
     //printf("Sent %u actions to rank 0\n", actionCount);
     if(mpi_myrank == 0)
     {
@@ -712,9 +716,9 @@ void exchange_cells_post() {
           message_wait_total_cycle_time += (get_Time() - idle_since);
 
           // receive the number of actions in the queue
-          unsigned int receive_actionCount;
+          unsigned int receive_actionCount=actionCountMax;
           unsigned long long t = get_Time();
-          MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMACTIONS, MPI_COMM_WORLD, &status);
+          //MPI_Recv(&receive_actionCount, 1, MPI_UNSIGNED, status.MPI_SOURCE, TAG_NUMACTIONS, MPI_COMM_WORLD, &status);
           message_wait_total_cycle_time += (get_Time() - t);
 
           //receive the action queue
@@ -728,29 +732,35 @@ void exchange_cells_post() {
           {
             unsigned int x = receive_actionQueue[j].x;
             unsigned int y = receive_actionQueue[j].y;
-        
-            switch(receive_actionQueue[j].action) {
-              case MOVE_TO:
-                g_worldGrid[y][x].occupancy++;
-                break;
-              case MOVE_FROM:
-                g_worldGrid[y][x].occupancy--;
-                break;
-              case SPRAY_PHEREMONE:
-                spray(x,y,5,2,1);     //edit the spray variables for test data
-                break;
-              case SPRAY_FOUND:
-                spray(x,y,1,1,1);
-                break;
-              case SPRAY_NEG:
-                spray(x,y,1,1,-1);  //  1,0 vs  1,1 
-                break;
-              case EAT:
-                eat(x,y);
-                break;
-              default:
-                break;
+            unsigned int nx = receive_actionQueue[j].nx;
+            unsigned int ny = receive_actionQueue[j].ny;
+            if (TRUE == receive_actionQueue[j].isValid){
+              switch(receive_actionQueue[j].action) {
+                /*case MOVE_TO:
+                  g_worldGrid[y][x].occupancy++;
+                  break;*/
+                case MOVE_FROM:
+                  g_worldGrid[y][x].occupancy--;
+                  g_worldGrid[ny][nx].occupancy++;
+                  break;
+                case SPRAY_PHEREMONE:
+                  spray(x,y,5,2,1);     //edit the spray variables for test data
+                  break;
+                case SPRAY_FOUND:
+                  spray(x,y,1,1,1);
+                  break;
+                case SPRAY_NEG:
+                  spray(x,y,1,1,-1);  //  1,0 vs  1,1 
+                  break;
+                case EAT:
+                  eat(x,y);
+                  break;
+                default:
+                  break;
+              }
             }
+            else
+              j=receive_actionCount;
           }
           free(receive_actionQueue);
           receivesRemaining--;
@@ -759,6 +769,7 @@ void exchange_cells_post() {
       }
     }
   actionCount = 0;
+  actionQueue[0].isValid = FALSE;
   exchange_cells_post_total_cycle_time += (get_Time() - exchange_cells_post_start_time); 
    //printf("Exiting exchange_cells_post\n");
 }
@@ -942,13 +953,13 @@ void print_world()
 /* Function: queue_action **************************************************/
 /***************************************************************************/
 //queues an action 
-void queue_action(ActionType action, unsigned int x, unsigned int y)
+void queue_action(ActionType action, unsigned int x, unsigned int y, unsigned int nx, unsigned int ny)
 {
   if (x > 1000 || y > 10000)
   {
     printf("ITS GOING CRAZZZZYYY.\n");
   }
-  if(actionCount > actionCountMax)
+  if(actionCount >= actionCountMax)
   {
     printf("ERROR: Action queue is full.\n");
   }
@@ -957,6 +968,11 @@ void queue_action(ActionType action, unsigned int x, unsigned int y)
     actionQueue[actionCount].action = action;
     actionQueue[actionCount].x = x;
     actionQueue[actionCount].y = y;
+    actionQueue[actionCount].nx = nx;
+    actionQueue[actionCount].ny = ny;
+    actionQueue[actionCount].isValid = TRUE;
     actionCount++;
+    if (actionCount < actionCountMax)
+      actionQueue[actionCount].isValid = FALSE;
   }
 }
