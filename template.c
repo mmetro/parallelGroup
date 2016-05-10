@@ -403,7 +403,7 @@ void allocate_and_init_array()
     {
       if (foodheap > 0)
       {
-        if (GenVal(row*col) < 2.0/g_array_size)
+        if (GenVal((row*col)%Maxgen) < 2.0/g_array_size)
         {
           alloc_food =  (unsigned int)(foodheap/g_array_size);
           if (foodheap > alloc_food)
@@ -783,7 +783,7 @@ void exchange_cells_post() {
 // each row has its own random stream
 double GenRowVal(unsigned int rowNumber)
 {
-  return GenVal(mpi_myrank * (g_array_size / mpi_commsize) + rowNumber);
+  return GenVal((mpi_myrank * (g_array_size / mpi_commsize) + rowNumber)%Maxgen);
 }
 
 // generate a random value for the rank's nth ant
@@ -791,7 +791,7 @@ double GenRowVal(unsigned int rowNumber)
 double GenAntVal(unsigned int antNumber)
 {
   // The first g_array_size values are reserved for each row's stream
-  return GenVal(g_array_size + mpi_myrank * (g_num_ants / mpi_commsize) + antNumber);
+  return GenVal((g_array_size + mpi_myrank * (g_num_ants / mpi_commsize) + antNumber)%Maxgen);
 }
 
 
