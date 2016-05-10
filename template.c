@@ -28,7 +28,7 @@
 /***************************************************************************/
 
 // Define if running not on the BGQ
- #define __LOCAL__
+// #define __LOCAL__
 
 
 // This gets clock cycle count locally
