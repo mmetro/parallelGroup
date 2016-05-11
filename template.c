@@ -960,10 +960,10 @@ void print_world()
 //queues an action 
 void queue_action(ActionType action, unsigned int x, unsigned int y, unsigned int nx, unsigned int ny)
 {
-  if (x > 1000 || y > 10000)
+  /*if (x > 1000 || y > 10000)
   {
     printf("ITS GOING CRAZZZZYYY.\n");
-  }
+  }*/
   if(actionCount >= actionCountMax)
   {
     printf("ERROR: Action queue is full.\n");
