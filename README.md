@@ -5,7 +5,9 @@ Michael Metrocavich
 Nevin Jacob 
 
 How to run:
-Compile the program using the included Makefile, the run it in a terminal by entering:
+Note- Comment out the "#define __LOCAL__" line if running on BGQ, or leave it uncommented if running
+on Kratos or on a personal machine. It is recommended that testing be done on BGQ though.
+Compile the program using the included Makefile, then run it in a terminal by entering:
 ./antfarm 0 <matrix size> <number of ants to use> <amount of food to spawn> 0
 Alternatively, if using BGQ, you can run the runall.bat to run all of the test cases used for 
 our writeup, or you can just run one of the jobs in that batch file if you just want to run
